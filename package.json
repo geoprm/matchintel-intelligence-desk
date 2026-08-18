@@ -1,0 +1,12 @@
+{
+  "name": "matchintel-intelligence-desk",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve public -l 4173",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

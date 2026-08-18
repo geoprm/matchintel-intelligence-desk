@@ -1,0 +1,24 @@
+MATCHINTEL — PC → NUVEM
+
+1. Copie os 4 arquivos desta pasta para dentro da pasta `gateway` onde já existem:
+   .env
+   src
+   node_modules
+   3_INICIAR_GATEWAY.bat
+
+2. Execute normalmente `3_INICIAR_GATEWAY.bat` e mantenha a janela aberta.
+
+3. Execute `1_CONFIGURAR_CLOUD.bat`.
+   Quando pedir a chave MATCHINTEL_INGEST_KEY, cole a chave fornecida pelo ChatGPT.
+   Ela será salva em `.env.cloud`, fora do GitHub.
+
+4. Execute `2_INICIAR_CLOUD_BRIDGE.bat` e mantenha a janela aberta.
+
+5. O esperado é aparecer:
+   MatchIntel Cloud Bridge ativo...
+   sync OK | matches=X signals=Y events=Z
+
+O bridge usa o endpoint autenticado local /radar já validado e tenta, quando existirem, /signals, /status e /events.
+Se esses endpoints auxiliares não existirem, ele continua operando com o que estiver presente no /radar.
+
+Nenhuma credencial Telegram, api_id, api_hash ou session é enviada para a nuvem.

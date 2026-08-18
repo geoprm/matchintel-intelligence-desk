@@ -1,0 +1,32 @@
+MATCHINTEL — GITHUB → VERCEL
+
+ETAPA 1 — GITHUB
+1. Acesse GitHub e crie um repositório vazio chamado:
+   matchintel-intelligence-desk
+2. Não marque README, .gitignore ou license.
+3. Baixe/extraia este pacote.
+4. Execute PUBLICAR_NO_GITHUB.bat.
+5. Cole a URL HTTPS do repositório quando solicitado.
+
+ETAPA 2 — VERCEL
+1. Entre no Vercel com sua conta.
+2. Add New > Project.
+3. Import Git Repository.
+4. Escolha matchintel-intelligence-desk.
+5. Framework Preset: Other.
+6. Build Command: node scripts/build.mjs
+7. Output Directory: dist
+8. Deploy.
+
+A PWA não precisa de variável secreta no Vercel.
+O frontend só contém a chave publishable do Supabase, protegida por RLS.
+
+ETAPA 3 — PC / GATEWAY
+1. Entre na pasta gateway-cloud-bridge deste pacote.
+2. Leia PASSO_A_PASSO_PC.txt.
+3. Copie os arquivos para a pasta gateway real do PC.
+4. Rode o Gateway.
+5. Rode 1_CONFIGURAR_CLOUD.bat e cole a chave privada fornecida no chat.
+6. Rode 2_INICIAR_CLOUD_BRIDGE.bat.
+
+Depois de instalado, o celular não precisa estar na mesma rede do PC.
