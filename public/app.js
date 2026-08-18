@@ -12,6 +12,15 @@ const fmtTime=(d)=>{try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit
 const minuteLabel=(m,phase)=>m!=null?`${m}'`:(phase||"—");
 const isLive=(m)=>["LIVE","1H","HT","2H","ET","P"].includes(String(m.state||m.phase||"").toUpperCase());
 
+const P0_VERSION="p0-freshness-v1.2";
+const PRIORITY_TTL_MS=5*60*1000;
+const SIGNAL_TTL_MS=10*60*1000;
+const LIVE_MATCH_TTL_MS=90*1000;
+const FUTURE_TOLERANCE_MS=2*60*1000;
+const gatewayFresh=()=>!!state.status?.last_sync_at && Date.now()-new Date(state.status.last_sync_at).getTime()<=90*1000;
+const matchAgeMs=(m)=>{const t=m?.updated_at?new Date(m.updated_at).getTime():0;return Number.isFinite(t)&&t?Date.now()-t:Number.POSITIVE_INFINITY};
+const isFreshLiveMatch=(m)=>gatewayFresh() && isLive(m) && matchAgeMs(m)>=-FUTURE_TOLERANCE_MS && matchAgeMs(m)<=LIVE_MATCH_TTL_MS;
+
 async function q(table, params=""){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`,{headers});
   if(!r.ok) throw new Error(`${table}: HTTP ${r.status}`);
@@ -34,29 +43,53 @@ async function loadAll(){
     if(cache){state.matches=cache.matches||[];state.signals=cache.signals||[];state.events=cache.events||[];state.status=cache.status||null;render();}
   }
 }
+function signalTime(s){
+  const raw=s.occurred_at||s.created_at;
+  const t=raw?new Date(raw).getTime():0;
+  return Number.isFinite(t)?t:0;
+}
+function signalAgeMs(s){ const t=signalTime(s); return t?Date.now()-t:Number.POSITIVE_INFINITY; }
+function signalExpiryMs(s){
+  const explicit=s.expires_at?new Date(s.expires_at).getTime():0;
+  if(Number.isFinite(explicit)&&explicit) return explicit;
+  const t=signalTime(s); return t?t+SIGNAL_TTL_MS:0;
+}
+function isFreshSignal(s,maxAge=SIGNAL_TTL_MS){
+  const age=signalAgeMs(s);
+  if(age < -FUTURE_TOLERANCE_MS || age > maxAge) return false;
+  const exp=signalExpiryMs(s);
+  return !exp || exp>Date.now();
+}
+function isFreshPriority(s){
+  return isFreshSignal(s,PRIORITY_TTL_MS) &&
+    (s.pinned||/APITAD|PIN/i.test(`${s.state||""} ${s.signal_type||""}`));
+}
 function dedupeSignals(rows){
   const seen=new Map();
   for(const s of rows){
     const fam=(s.provider_family||"").toLowerCase().includes("betzord")?"betzord":(s.provider_family||s.provider_name||"").toLowerCase();
-    const t=s.occurred_at||s.created_at||"";
-    const bucket=t?Math.floor(new Date(t).getTime()/60000/3):0;
-    const key=[s.match_key||"",fam,s.market||s.signal_type||"",bucket].join("|");
-    if(!seen.has(key)) seen.set(key,s); else {
-      const old=seen.get(key);
-      if(s.pinned&&!old.pinned) seen.set(key,s);
-    }
+    const key=s.fingerprint || [
+      s.source_event_id||"",s.match_key||"",fam,s.signal_type||"",s.market||"",
+      s.text_summary||"",s.pinned?"1":"0"
+    ].join("|").toLowerCase();
+    const old=seen.get(key);
+    if(!old || signalTime(s)>signalTime(old)) seen.set(key,s);
   }
-  return [...seen.values()];
+  return [...seen.values()].sort((a,b)=>signalTime(b)-signalTime(a));
 }
 function renderStatus(){
   const s=state.status;
   const stale=!s?.last_sync_at || Date.now()-new Date(s.last_sync_at).getTime()>90000;
+  const recentTelegram=state.signals.some(x=>["mafia","betzord"].includes(providerKind(x)) && isFreshSignal(x));
+  const telegramOn=!!s?.telegram_connected || recentTelegram;
   $("#statusPills").innerHTML=[
     `<span class="pill ${s?.gateway_online&&!stale?"ok":"bad"}">Gateway ${s?.gateway_online&&!stale?"ON":"OFF"}</span>`,
-    `<span class="pill ${s?.telegram_connected?"ok":"warn"}">Telegram ${s?.telegram_connected?"ON":"—"}</span>`,
+    `<span class="pill ${telegramOn&&!stale?"ok":"warn"}">Telegram ${telegramOn&&!stale?"ON":"—"}</span>`,
     `<span class="pill ${s?.shadow_mode?"warn":"ok"}">${s?.shadow_mode?"SHADOW":"LIVE"}</span>`
   ].join("");
-  $("#lastSync").textContent=s?.last_sync_at?`Sync ${fmtTime(s.last_sync_at)}`:"Sem sincronização";
+  if(!s?.last_sync_at) $("#lastSync").textContent="Sem sincronização";
+  else if(stale) $("#lastSync").textContent=`Gateway sem sync · última ${fmtTime(s.last_sync_at)}`;
+  else $("#lastSync").textContent=`Sync ${fmtTime(s.last_sync_at)}`;
 }
 function matchCard(m){
   const score=(m.home_score!=null&&m.away_score!=null)?`${m.home_score}–${m.away_score}`:"—";
@@ -69,41 +102,52 @@ function matchCard(m){
   </div>`;
 }
 function renderHome(){
-  const priorities=state.signals.filter(s=>s.pinned||/APITAD|PIN/i.test(`${s.state} ${s.signal_type}`)).slice(0,4);
-  $("#priorityList").innerHTML=priorities.length?priorities.map(signalCard).join(""):empty("Sem prioridade crítica","Nenhum PINNED/JOGO APITADO real recebido agora.");
-  const live=state.matches.filter(isLive).slice(0,6);
-  $("#homeLive").innerHTML=live.length?live.map(matchCard).join(""):empty("Nenhum jogo ao vivo no relay","Quando o Gateway encontrar partidas reais, elas aparecem aqui.");
+  const activeSignals=state.signals.filter(s=>isFreshSignal(s));
+  const priorities=activeSignals.filter(isFreshPriority).slice(0,4);
+  $("#priorityList").innerHTML=priorities.length?priorities.map(signalCard).join(""):empty("Sem prioridade crítica","Nenhum PINNED/JOGO APITADO fresco recebido nos últimos 5 minutos.");
+  const live=state.matches.filter(isFreshLiveMatch).slice(0,6);
+  $("#homeLive").innerHTML=live.length?live.map(matchCard).join(""):empty(
+    gatewayFresh()?"Nenhum jogo ao vivo no relay":"Gateway sem atualização",
+    gatewayFresh()?"Quando o Gateway encontrar partidas reais, elas aparecem aqui.":"Partidas antigas ficam bloqueadas até uma nova sincronização."
+  );
   $("#liveCount").textContent=`${live.length} jogo${live.length===1?"":"s"}`;
 
+  const freshMatches=state.matches.filter(m=>!isLive(m) || isFreshLiveMatch(m));
   const metrics=[
-    ["Late Goal", state.matches.filter(m=>/late/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["Corner", state.matches.filter(m=>/corner|escante/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["Instant", state.matches.filter(m=>/instant|next|próxim/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["HT / Goal HT", state.matches.filter(m=>/ht|1h/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
-    ["2º Tempo", state.matches.filter(m=>/2h|2º|segundo/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
-    ["Chaos / Ruptura", state.matches.filter(m=>/chaos|ruptur|nuclear/i.test(`${m.radar_state} ${m.best_market}`)).length],
+    ["Late Goal", freshMatches.filter(m=>/late/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["Corner", freshMatches.filter(m=>/corner|escante/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["Instant", freshMatches.filter(m=>/instant|next|próxim/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["HT / Goal HT", freshMatches.filter(m=>/ht|1h/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
+    ["2º Tempo", freshMatches.filter(m=>/2h|2º|segundo/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
+    ["Chaos / Ruptura", freshMatches.filter(m=>/chaos|ruptur|nuclear/i.test(`${m.radar_state} ${m.best_market}`)).length],
   ];
-  $("#radarCards").innerHTML=metrics.map(([label,n])=>`<div class="card kpi"><div class="label">${esc(label)}</div><div class="value">${n}</div><div class="sub">sessões reais</div></div>`).join("");
-  $("#homeSignals").innerHTML=state.signals.length?state.signals.slice(0,5).map(signalCard).join(""):empty("Sem sinais recentes","O Telegram conectado ao Gateway alimentará esta área automaticamente.");
+  $("#radarCards").innerHTML=metrics.map(([label,n])=>`<div class="card kpi"><div class="label">${esc(label)}</div><div class="value">${n}</div><div class="sub">sessões elegíveis</div></div>`).join("");
+  $("#homeSignals").innerHTML=activeSignals.length?activeSignals.slice(0,5).map(signalCard).join(""):empty("Sem sinais ativos","Sinais com mais de 10 minutos não aparecem como atuais.");
 }
 function filterMatch(m,f){
+  if(!isFreshLiveMatch(m)) return false;
   const t=`${m.best_market||""} ${m.radar_state||""} ${m.phase||""}`.toLowerCase();
-  if(f==="all") return isLive(m);
-  if(f==="goal") return isLive(m)&&/gol|goal/.test(t);
-  if(f==="corner") return isLive(m)&&/corner|escante/.test(t);
-  if(f==="instant") return isLive(m)&&/instant|next|próxim/.test(t);
-  if(f==="HT") return isLive(m)&&/ht|1h/.test(t);
-  if(f==="2H") return isLive(m)&&/2h|2º|segundo/.test(t);
-  if(f==="late") return isLive(m)&&/late|84|85|83|75|80/.test(t);
-  return isLive(m);
+  if(f==="all") return true;
+  if(f==="goal") return /gol|goal/.test(t);
+  if(f==="corner") return /corner|escante/.test(t);
+  if(f==="instant") return /instant|next|próxim/.test(t);
+  if(f==="HT") return /ht|1h/.test(t);
+  if(f==="2H") return /2h|2º|segundo/.test(t);
+  if(f==="late") return /late|84|85|83|75|80/.test(t);
+  return true;
 }
 function renderLive(){
   const rows=state.matches.filter(m=>filterMatch(m,state.liveFilter));
-  $("#liveList").innerHTML=rows.length?rows.map(matchCard).join(""):empty("Nenhum jogo neste filtro","O filtro mostra somente dados reais presentes no relay.");
+  $("#liveList").innerHTML=rows.length?rows.map(matchCard).join(""):empty(
+    gatewayFresh()?"Nenhum jogo neste filtro":"Gateway sem atualização",
+    gatewayFresh()?"O filtro mostra somente partidas reais e frescas.":"Nenhuma partida antiga é tratada como ao vivo."
+  );
 }
 function providerKind(s){const x=`${s.provider_family} ${s.provider_name}`.toLowerCase();return x.includes("betzord")?"betzord":x.includes("máfia")||x.includes("mafia")?"mafia":"other"}
 function signalCard(s){
   const bz=providerKind(s)==="betzord";
+  const age=Math.max(0,signalAgeMs(s));
+  const ageLabel=age<60*1000?"agora":`${Math.floor(age/60000)} min`;
   const badges=[
     s.pinned?`<span class="badge pin">PINNED</span>`:"",
     /APITAD/i.test(`${s.signal_type} ${s.state}`)?`<span class="badge pin">${esc(s.signal_type||s.state)}</span>`:"",
@@ -111,20 +155,20 @@ function signalCard(s){
   ].join("");
   return `<div class="signal">
     <div class="avatar ${bz?"bz":""}">${bz?"BZ":"CM"}</div>
-    <div class="signal-main"><strong>${esc(s.provider_name||s.provider_family)} ${badges}</strong><p>${esc(s.text_summary||s.market||s.signal_type)}</p><small>${esc(s.market||"")} · ${fmtTime(s.occurred_at||s.created_at)}</small></div>
+    <div class="signal-main"><strong>${esc(s.provider_name||s.provider_family)} ${badges}</strong><p>${esc(s.text_summary||s.market||s.signal_type)}</p><small>${esc(s.market||"")} · ${ageLabel}</small></div>
   </div>`;
 }
 function renderSignals(){
-  let rows=state.signals;
+  let rows=state.signals.filter(s=>isFreshSignal(s));
   if(state.signalFilter!=="all") rows=rows.filter(s=>providerKind(s)===state.signalFilter);
   $("#signalCount").textContent=String(rows.length);
-  $("#signalList").innerHTML=rows.length?rows.map(signalCard).join(""):empty("Sem sinais","Nenhum sinal real recebido neste filtro.");
+  $("#signalList").innerHTML=rows.length?rows.map(signalCard).join(""):empty("Sem sinais ativos","Sinais expirados ficam fora do painel operacional.");
   const s=state.status;
   const sources=[
     ["API-Football",s?.api_provider?.toLowerCase().includes("football")||s?.auto_scan_active,"fixtures, placar e estatísticas via Gateway"],
-    ["Telegram",!!s?.telegram_connected,"Chat Máfia / BetZord via conta local"],
+    ["Telegram",!!s?.telegram_connected&&!(!s?.last_sync_at||Date.now()-new Date(s.last_sync_at).getTime()>90000),"Chat Máfia / BetZord via conta local"],
     ["Source Matrix",(s?.independent_sources||0)>0,`${s?.independent_sources||0} fonte(s) independente(s) no status global`],
-    ["Bet365",false,"view/print/link — não marcar como conexão automática"],
+    ["Bet365",false,"link original do Chat Máfia / view manual"],
     ["SofaScore / Flashscore",false,"planejadas/manual quando não houver adapter ativo"]
   ];
   $("#sourceList").innerHTML=sources.map(([name,on,sub])=>`<div class="source"><span class="dot" style="${on?"":"background:#566663"}"></span><div class="main"><strong>${name}</strong><small>${esc(sub)}</small></div><span class="pill ${on?"ok":""}">${on?"Ativa":"Manual"}</span></div>`).join("");
@@ -216,5 +260,11 @@ let deferredPrompt=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;$("#installBtn").classList.remove("hidden")});
 $("#installBtn").onclick=async()=>{if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$("#installBtn").classList.add("hidden")}};
 
-if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(console.error);
+if(localStorage.getItem("matchintel-p0-version")!==P0_VERSION){
+  localStorage.removeItem("matchintel-cache");
+  localStorage.setItem("matchintel-p0-version",P0_VERSION);
+}
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("/sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(console.error);
+}
 loadEvidence();loadAll();setInterval(loadAll,20000);
