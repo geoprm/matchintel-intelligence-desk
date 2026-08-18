@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="1.2-P0";
+const VERSION="1.3-P1";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +55,40 @@ function parseSourceTime(s){
   if(!raw) return null;
   const d=new Date(raw);
   return Number.isFinite(d.getTime())?d.toISOString():null;
+}
+
+function extractUrls(s){
+  const values=[
+    s.bookmaker_url,s.bookmakerUrl,s.bet365_url,s.bet365Url,s.betano_url,s.betanoUrl,
+    s.game_link,s.gameLink,s.link,s.url,s.raw_url,s.rawUrl,
+    s.text,s.message,s.summary,s.text_summary,s.caption,s.rawText
+  ].filter(v=>typeof v==="string");
+  const urls=[];
+  for(const v of values){
+    if(/^https?:\/\//i.test(v.trim())) urls.push(v.trim());
+    for(const m of v.matchAll(/https?:\/\/[^\s<>"')\]]+/gi)) urls.push(m[0].replace(/[.,;!?]+$/,""));
+  }
+  return [...new Set(urls)];
+}
+function allowedBookmakerUrl(s){
+  const kind=`${s.provider_family||s.providerFamily||s.family||s.provider||""} ${s.provider_name||s.providerName||s.chatName||s.source||""}`.toLowerCase();
+  const mafia=kind.includes("mafia")||kind.includes("máfia");
+  const betzord=kind.includes("betzord");
+  for(const raw of extractUrls(s)){
+    try{
+      const u=new URL(raw); if(u.protocol!=="https:")continue;
+      const h=u.hostname.toLowerCase();
+      if(mafia && (h==="bet365.bet.br"||h.endsWith(".bet365.bet.br")||h==="bet365.com"||h.endsWith(".bet365.com"))){
+        return {bookmaker:"BET365",bookmaker_url:u.href};
+      }
+      if(betzord && (h==="betano.bet.br"||h.endsWith(".betano.bet.br")||h==="betanobr.com"||h.endsWith(".betanobr.com"))){
+        return {bookmaker:"BETANO",bookmaker_url:u.href};
+      }
+    }catch{}
+  }
+  if(betzord) return {bookmaker:"BETANO",bookmaker_url:"https://www.betano.bet.br/"};
+  if(mafia) return {bookmaker:"BET365",bookmaker_url:null};
+  return {bookmaker:null,bookmaker_url:null};
 }
 function sigFingerprint(s){
   const sid=sourceEventId(s);
@@ -111,6 +145,7 @@ function normalizeSignal(s,baselineOnly=false){
   }
 
   rec.forwardedAt=nowIso;
+  const book=allowedBookmakerUrl(s);
   return {
     match_key:text(s.match_key,s.matchKey,s.match?.key),
     provider_family:text(s.provider_family,s.providerFamily,s.family,s.provider)||"unknown",
@@ -122,7 +157,9 @@ function normalizeSignal(s,baselineOnly=false){
     pinned:Boolean(s.pinned||s.isPinned),
     author_role:text(s.author_role,s.authorRole),
     occurred_at:occurred,
-    source_event_id:sourceEventId(s)
+    source_event_id:sourceEventId(s),
+    bookmaker:book.bookmaker,
+    bookmaker_url:book.bookmaker_url
   };
 }
 function normalizeMatch(m){
@@ -218,12 +255,12 @@ async function tick(){
   const dropped=cloud?.dropped||{};
   console.log(
     new Date().toLocaleTimeString(),
-    `P0 sync OK | matches=${matches.length} signals=${signals.length} events=${events.length}`+
+    `P1 sync OK | matches=${matches.length} signals=${signals.length} events=${events.length}`+
     `${baselineOnly?" | BASELINE BLOQUEADA":""}`+
     `${dropped.signals_stale?` | cloud stale=${dropped.signals_stale}`:""}`
   );
 }
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P0 freshness guard | intervalo ${every/1000}s`);
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P0 freshness + P1 bookmaker links | intervalo ${every/1000}s`);
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

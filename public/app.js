@@ -13,6 +13,10 @@ const minuteLabel=(m,phase)=>m!=null?`${m}'`:(phase||"—");
 const isLive=(m)=>["LIVE","1H","HT","2H","ET","P"].includes(String(m.state||m.phase||"").toUpperCase());
 
 const P0_VERSION="p0-freshness-v1.2";
+const P1_VERSION="p1-push-v1.0";
+const VAPID_PUBLIC_KEY="BGaSDtAPm1iwLkjlsti4WsrCW5xIlp_Nc5dgNniZv2UMyL6qxgKBJlNi-cJBShyZRhfWc-DIFdU32Oj-RGH61Qw";
+const PUSH_SUBSCRIBE_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-subscribe";
+const PUSH_TEST_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-test";
 const PRIORITY_TTL_MS=5*60*1000;
 const SIGNAL_TTL_MS=10*60*1000;
 const LIVE_MATCH_TTL_MS=90*1000;
@@ -144,10 +148,31 @@ function renderLive(){
   );
 }
 function providerKind(s){const x=`${s.provider_family} ${s.provider_name}`.toLowerCase();return x.includes("betzord")?"betzord":x.includes("máfia")||x.includes("mafia")?"mafia":"other"}
+function safeBookmakerUrl(s){
+  const raw=String(s?.bookmaker_url||"").trim();
+  if(!raw) return "";
+  try{
+    const u=new URL(raw);
+    if(u.protocol!=="https:") return "";
+    const h=u.hostname.toLowerCase();
+    const kind=providerKind(s);
+    if(kind==="mafia"){
+      const ok=h==="bet365.bet.br"||h.endsWith(".bet365.bet.br")||h==="bet365.com"||h.endsWith(".bet365.com");
+      return ok?u.href:"";
+    }
+    if(kind==="betzord"){
+      const ok=h==="betano.bet.br"||h.endsWith(".betano.bet.br")||h==="betanobr.com"||h.endsWith(".betanobr.com");
+      return ok?u.href:"";
+    }
+    return "";
+  }catch{return ""}
+}
 function signalCard(s){
   const bz=providerKind(s)==="betzord";
   const age=Math.max(0,signalAgeMs(s));
   const ageLabel=age<60*1000?"agora":`${Math.floor(age/60000)} min`;
+  const bookUrl=safeBookmakerUrl(s);
+  const bookLabel=bz?"Abrir Betano":"Abrir Bet365";
   const badges=[
     s.pinned?`<span class="badge pin">PINNED</span>`:"",
     /APITAD/i.test(`${s.signal_type} ${s.state}`)?`<span class="badge pin">${esc(s.signal_type||s.state)}</span>`:"",
@@ -155,7 +180,12 @@ function signalCard(s){
   ].join("");
   return `<div class="signal">
     <div class="avatar ${bz?"bz":""}">${bz?"BZ":"CM"}</div>
-    <div class="signal-main"><strong>${esc(s.provider_name||s.provider_family)} ${badges}</strong><p>${esc(s.text_summary||s.market||s.signal_type)}</p><small>${esc(s.market||"")} · ${ageLabel}</small></div>
+    <div class="signal-main">
+      <strong>${esc(s.provider_name||s.provider_family)} ${badges}</strong>
+      <p>${esc(s.text_summary||s.market||s.signal_type)}</p>
+      <small>${esc(s.market||"")} · ${ageLabel}</small>
+      ${bookUrl?`<div class="signal-actions"><a class="bookmaker-link" href="${esc(bookUrl)}" target="_blank" rel="noopener noreferrer">${bookLabel} ↗</a></div>`:""}
+    </div>
   </div>`;
 }
 function renderSignals(){
@@ -252,6 +282,117 @@ $("#evidenceInput").onchange=async(e)=>{
   localStorage.setItem("matchintel-evidence",JSON.stringify(state.evidence));renderEvidence();e.target.value="";
 };
 
+
+function b64UrlToUint8Array(base64String){
+  const padding="=".repeat((4-base64String.length%4)%4);
+  const base64=(base64String+padding).replace(/-/g,"+").replace(/_/g,"/");
+  const raw=atob(base64);
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+function setAlertsStatus(text,active=false){
+  const el=$("#alertsStatus");
+  if(el){el.textContent=text;el.classList.toggle("active",!!active)}
+  const btn=$("#alertsBtn");
+  if(btn){
+    btn.textContent=active?"🔔 Alertas críticos ativos":"🔔 Ativar alertas críticos";
+    btn.classList.toggle("active",!!active);
+  }
+}
+async function playAlertTone(){
+  try{
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx)return;
+    const ctx=new Ctx();
+    const beep=(when,freq,dur)=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.frequency.value=freq;g.gain.setValueAtTime(.0001,when);
+      g.gain.exponentialRampToValueAtTime(.16,when+.02);
+      g.gain.exponentialRampToValueAtTime(.0001,when+dur);
+      o.connect(g);g.connect(ctx.destination);o.start(when);o.stop(when+dur+.03);
+    };
+    beep(ctx.currentTime,880,.16);beep(ctx.currentTime+.22,1175,.18);
+    setTimeout(()=>ctx.close().catch(()=>{}),700);
+  }catch{}
+}
+async function postPushSubscription(subscription){
+  const r=await fetch(PUSH_SUBSCRIBE_URL,{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({subscription:subscription.toJSON()})
+  });
+  if(!r.ok) throw new Error(`subscribe HTTP ${r.status}`);
+  return r.json();
+}
+async function sendPushTest(subscription){
+  const r=await fetch(PUSH_TEST_URL,{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({endpoint:subscription.endpoint})
+  });
+  if(!r.ok) throw new Error(`test HTTP ${r.status}`);
+  return r.json();
+}
+async function ensurePushSubscription(sendTest=false){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
+    setAlertsStatus("Este navegador não oferece Web Push compatível.");
+    return false;
+  }
+  const permission=Notification.permission==="granted"?"granted":await Notification.requestPermission();
+  if(permission!=="granted"){
+    setAlertsStatus(permission==="denied"?"Notificações bloqueadas no Android/Chrome.":"Permissão de notificação não concedida.");
+    return false;
+  }
+  const reg=await navigator.serviceWorker.ready;
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub){
+    sub=await reg.pushManager.subscribe({
+      userVisibleOnly:true,
+      applicationServerKey:b64UrlToUint8Array(VAPID_PUBLIC_KEY)
+    });
+  }
+  await postPushSubscription(sub);
+  localStorage.setItem("matchintel-push-enabled","1");
+  setAlertsStatus("Alertas ativos neste aparelho. Push crítico + som do Android.",true);
+  await playAlertTone();
+  if(sendTest) await sendPushTest(sub);
+  return true;
+}
+async function initPushUI(){
+  const btn=$("#alertsBtn");
+  if(!btn)return;
+  btn.onclick=async()=>{
+    btn.disabled=true;
+    setAlertsStatus("Configurando alertas...");
+    try{
+      await ensurePushSubscription(true);
+    }catch(e){
+      console.error(e);
+      setAlertsStatus("Não consegui concluir o teste de push. Toque para tentar novamente.");
+    }finally{btn.disabled=false}
+  };
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
+    btn.classList.add("hidden");
+    setAlertsStatus("Web Push não suportado neste navegador.");
+    return;
+  }
+  if(Notification.permission==="granted"){
+    try{
+      const reg=await navigator.serviceWorker.ready;
+      const sub=await reg.pushManager.getSubscription();
+      if(sub){
+        await postPushSubscription(sub);
+        setAlertsStatus("Alertas ativos neste aparelho.",true);
+      }
+    }catch{}
+  }
+}
+navigator.serviceWorker?.addEventListener?.("message",e=>{
+  if(e.data?.type==="MATCHINTEL_PUSH"){
+    playAlertTone();
+    loadAll();
+  }
+});
+
 window.addEventListener("online",()=>$("#offlineBanner").classList.add("hidden"));
 window.addEventListener("offline",()=>$("#offlineBanner").classList.remove("hidden"));
 if(!navigator.onLine)$("#offlineBanner").classList.remove("hidden");
@@ -267,4 +408,7 @@ if(localStorage.getItem("matchintel-p0-version")!==P0_VERSION){
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("/sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(console.error);
 }
-loadEvidence();loadAll();setInterval(loadAll,20000);
+loadEvidence();
+loadAll();
+initPushUI();
+setInterval(loadAll,20000);

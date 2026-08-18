@@ -35,3 +35,22 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 .note{font-size:10px;color:var(--muted);line-height:1.55}.warning{color:var(--yellow)}.danger{color:var(--red)}.good{color:var(--green)}
 .install{border:1px solid rgba(218,185,112,.3);background:rgba(218,185,112,.07);color:var(--gold);border-radius:12px;padding:9px 11px;font-size:11px}
 @media(min-width:620px){.app{padding-left:20px;padding-right:20px}.grid.three{grid-template-columns:repeat(3,1fr)}}
+
+
+/* P1 — alertas e bookmaker actions */
+.install.alerts{margin-left:8px}
+.install.alerts.active{border-color:rgba(54,221,157,.48);color:#58e6ad;background:rgba(37,168,116,.09)}
+.alert-status{font-size:12px;color:#7f918d;margin:8px 2px 0 2px}
+.alert-status.active{color:#58e6ad}
+.signal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.bookmaker-link{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:8px 11px;border:1px solid rgba(202,174,99,.34);
+  border-radius:10px;color:#e6ca82;text-decoration:none;font-size:12px;font-weight:800;
+  background:rgba(202,174,99,.06)
+}
+.bookmaker-link:active{transform:scale(.98)}
+@media(max-width:520px){
+  .install.alerts{margin-left:0;margin-top:8px}
+  .alert-status{margin-bottom:3px}
+}
