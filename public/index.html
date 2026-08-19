@@ -34,10 +34,15 @@
       <div id="dailyTickets"></div>
 
       <div class="section-title"><h2>Performance confiável</h2><span id="performanceBadge">AUDITADO · SHADOW</span></div>
-      <div id="performanceLab"></div>
+      <div id="performanceLab" class="lab-shell"></div>
+      <button id="performanceToggle" class="lab-toggle" type="button">Ver análise completa</button>
 
       <div class="section-title"><h2>Replay & Calibration Lab</h2><span id="backtestBadge">SHADOW · aguardando</span></div>
-      <div id="backtestLab"></div>
+      <div id="backtestLab" class="lab-shell"></div>
+      <button id="backtestToggle" class="lab-toggle" type="button">Ver análise completa</button>
+
+      <div class="section-title"><h2>Lifecycle operacional</h2><span id="lifecycleBadge">sincronizando</span></div>
+      <div id="lifecycleSummary" class="lifecycle-grid"></div>
 
       <div class="section-title"><h2>Pré-live</h2><span id="preliveCount">0 jogos</span></div>
       <div id="homePrelive" class="card"></div>
@@ -120,4 +125,5 @@
 <script src="/performance-lab.js" type="module"></script>
 <script src="/backtest-lab.js" type="module"></script>
 <script src="/value-board.js" type="module"></script>
+<script src="/operational-ux.js" type="module"></script>
 </body></html>

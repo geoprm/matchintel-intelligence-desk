@@ -59,11 +59,15 @@ function tpMetricCard(label,m,sub){
   return `<div class="tp-metric"><small>${tpEsc(label)}</small><b>${m.count?tpPct(m.hit_rate):'—'}</b><span>${m.count} auditáveis · ${m.wins||0}G/${m.losses||0}R</span>${sub?`<em>${tpEsc(sub)}</em>`:''}</div>`;
 }
 function tpResultTag(r,auditSet){
+  /* P6_2_NEUTRAL_EXCLUDED_RESULT */
   const key=r.record_key||`${r.record_kind}|${r.match_key}|${r.market}|${r.locked_at}`;
   const info=auditSet.get(key);
+  if(!info?.eligible){
+    const historical=r.result==='WON'?'GREEN':r.result==='LOST'?'RED':String(r.result||'N/D');
+    return `<span class="perf-result historical">HISTÓRICO · ${tpEsc(historical)}</span><span class="tp-audit no">NÃO AUDITÁVEL · ${tpEsc(info?.reason||'não auditável')}</span>`;
+  }
   const result=r.result==='WON'?'<span class="perf-result won">GREEN</span>':r.result==='LOST'?'<span class="perf-result lost">RED</span>':'<span class="perf-result neutral">N/D</span>';
-  const badge=info?.eligible?'<span class="tp-audit ok">AUDITÁVEL</span>':`<span class="tp-audit no">EXCLUÍDO · ${tpEsc(info?.reason||'não auditável')}</span>`;
-  return `${result}${badge}`;
+  return `${result}<span class="tp-audit ok">AUDITÁVEL</span>`;
 }
 function tpRecTitle(r){
   if(r.record_kind==='TICKET')return `Bilhete ${r.ticket_type||''}`;

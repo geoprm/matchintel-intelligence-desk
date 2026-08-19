@@ -3,7 +3,8 @@ const SUPABASE_URL = "https://tkzfkkqcgmzqjfcokrws.supabase.co";
 const SUPABASE_KEY = "sb_publishable_8l70j1YfLAOdNn2auEBYXA_tue5rP9T";
 const headers = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
 window.MATCHINTEL_CONFIG={SUPABASE_URL,SUPABASE_KEY};
-const state = { matches:[], signals:[], events:[], status:null, liveFilter:"all", signalFilter:"all", evidence:[], preliveVisible:8 };
+const state = { matches:[], signals:[], events:[], status:null, lifecycleSummary:{}, liveFilter:"all", signalFilter:"all", evidence:[], preliveVisible:8 };
+/* P6_2_ACTIVE_MATCH_LIFECYCLE */
 
 const $ = (s)=>document.querySelector(s);
 const $$=(s)=>[...document.querySelectorAll(s)];
@@ -84,12 +85,17 @@ async function q(table, params=""){
 }
 async function loadAll(){
   try{
-    const [matches,signals,events,status] = await Promise.all([
-      q("matchintel_matches","select=*&order=updated_at.desc&limit=150"),
+    const [activeMatches,historyMatches,lifecycleRows,signals,events,status] = await Promise.all([
+      q("matchintel_match_lifecycle","select=*&lifecycle_state=eq.ATIVO&order=updated_at.desc&limit=1000"),
+      q("matchintel_match_lifecycle","select=*&lifecycle_state=in.(FINALIZADO,HISTORICO)&order=updated_at.desc&limit=160"),
+      q("matchintel_match_lifecycle_summary","select=*"),
       q("matchintel_signals","select=*&order=created_at.desc&limit=200"),
       q("matchintel_events","select=*&order=detected_at.desc&limit=300"),
       q("matchintel_system_status","select=*&id=eq.main&limit=1")
     ]);
+    const _seenMatches=new Set();
+    const matches=[...activeMatches,...historyMatches].filter(m=>{const k=m.match_key||m.provider_match_id||JSON.stringify([m.home,m.away,m.updated_at]);if(_seenMatches.has(k))return false;_seenMatches.add(k);return true});
+    state.lifecycleSummary=Object.fromEntries((lifecycleRows||[]).map(x=>[x.lifecycle_state,Number(x.match_count||0)]));
     state.matches=matches; state.signals=dedupeSignals(signals); state.events=events; state.status=status[0]||null;
     render();
     localStorage.setItem("matchintel-cache", JSON.stringify({matches,signals:state.signals,events,status:state.status,at:Date.now()}));
