@@ -3,7 +3,7 @@ const SUPABASE_URL = "https://tkzfkkqcgmzqjfcokrws.supabase.co";
 const SUPABASE_KEY = "sb_publishable_8l70j1YfLAOdNn2auEBYXA_tue5rP9T";
 const headers = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
 window.MATCHINTEL_CONFIG={SUPABASE_URL,SUPABASE_KEY};
-const state = { matches:[], signals:[], events:[], status:null, liveFilter:"all", signalFilter:"all", evidence:[] };
+const state = { matches:[], signals:[], events:[], status:null, liveFilter:"all", signalFilter:"all", evidence:[], preliveVisible:8 };
 
 const $ = (s)=>document.querySelector(s);
 const $$=(s)=>[...document.querySelectorAll(s)];
@@ -18,6 +18,50 @@ const isPrelive=(m)=>{
 };
 const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
 const scheduledLabel=(m)=>{const d=scheduledAt(m);if(!d)return m.phase||m.state||"Pré-live";try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit"})}catch{return "Pré-live"}};
+/* P4A3_FEATURED_PRELIVE */
+function isFinishedMatch(m){
+  const s=`${m?.state||""} ${m?.phase||""}`.toUpperCase();
+  return /FINISHED|\bFT\b|\bAET\b|\bPEN\b/.test(s);
+}
+function preliveScore(m){
+  const level=String(m?.best_level||"").toLowerCase();
+  const levelBoost=/elite/.test(level)?30:/forte/.test(level)?22:/monitorar/.test(level)?10:0;
+  const prob=Number.isFinite(Number(m?.best_probability))?Math.max(0,Math.min(100,Number(m.best_probability))):0;
+  const dq=Number.isFinite(Number(m?.data_quality))?Math.max(0,Math.min(100,Number(m.data_quality))):0;
+  const pri=Number.isFinite(Number(m?.priority))?Math.max(0,Math.min(100,Number(m.priority))):0;
+  const src=Math.max(0,Math.min(3,Number(m?.independent_sources||0)))*10;
+  const signalBoost=state.signals.some(s=>s.match_key===m.match_key&&isFreshSignal(s))?15:0;
+  return levelBoost+prob*.25+dq*.25+pri*.15+src+signalBoost;
+}
+function isFeaturedPrelive(m){
+  if(!isPrelive(m))return false;
+  const level=String(m?.best_level||"").toLowerCase();
+  const p=Number(m?.best_probability),dq=Number(m?.data_quality),src=Number(m?.independent_sources||0);
+  return /elite|forte/.test(level)||(Number.isFinite(p)&&Number.isFinite(dq)&&p>=68&&dq>=60)||src>=2||preliveScore(m)>=65;
+}
+function preliveSort(a,b){
+  const af=isFeaturedPrelive(a)?1:0,bf=isFeaturedPrelive(b)?1:0;
+  if(af!==bf)return bf-af;
+  const sd=preliveScore(b)-preliveScore(a);if(Math.abs(sd)>.01)return sd;
+  return new Date(scheduledAt(a)||"2999-01-01")-new Date(scheduledAt(b)||"2999-01-01");
+}
+function preliveOperationalLabel(m){return isFeaturedPrelive(m)?"DESTAQUE":"RASTREANDO"}
+function statValue(m,v){
+  if(isPrelive(m)||v==null)return "—";
+  if(Array.isArray(v)){
+    if(!v.length||v.every(x=>x==null))return "—";
+    return v.map(x=>x==null?"—":String(x)).join("–");
+  }
+  if(typeof v==="object"){
+    const h=v.home??v[0],a=v.away??v[1];
+    if(h==null&&a==null)return "—";
+    return `${h??"—"}–${a??"—"}`;
+  }
+  return String(v);
+}
+function qualityLabel(m){return m?.data_quality==null?"—":`${Number(m.data_quality)}%`}
+function qualityWidth(m){return m?.data_quality==null?0:Math.max(0,Math.min(100,Number(m.data_quality)||0))}
+
 
 const P0_VERSION="p0-freshness-v1.2";
 const P1_VERSION="p1-push-v1.0.1";
@@ -104,25 +148,31 @@ function renderStatus(){
   else $("#lastSync").textContent=`Sync ${fmtTime(s.last_sync_at)}`;
 }
 function matchCard(m){
-  const score=isPrelive(m)?"—":((m.home_score!=null&&m.away_score!=null)?`${m.home_score}–${m.away_score}`:"—");
+  const pre=isPrelive(m),featured=pre&&isFeaturedPrelive(m);
+  const score=pre?"—":((m.home_score!=null&&m.away_score!=null)?`${m.home_score}–${m.away_score}`:"—");
   const prob=m.best_probability!=null?Math.round(Number(m.best_probability)):"—";
-  const clock=isPrelive(m)?scheduledLabel(m):minuteLabel(m.minute,m.phase);
-  return `<div class="match" data-match="${esc(m.match_key)}">
+  const clock=pre?scheduledLabel(m):minuteLabel(m.minute,m.phase);
+  const marketLabel=m.best_market||(pre?preliveOperationalLabel(m):(m.radar_state||""));
+  return `<div class="match ${featured?"featured":""}" data-match="${esc(m.match_key)}">
     <div class="minute">${esc(clock)}</div>
-    <div class="teams"><strong>${esc(m.home)} × ${esc(m.away)}</strong><small>${esc(m.competition||m.radar_state||m.state||"")}</small></div>
+    <div class="teams"><strong>${esc(m.home)} × ${esc(m.away)} ${featured?'<span class="featured-badge">DESTAQUE</span>':""}</strong><small>${esc(m.competition||m.radar_state||m.state||"")}</small></div>
     <div class="score">${score}</div>
-    <div class="market">${esc(m.best_market||m.radar_state||"")}<b>${prob}${prob!=="—"?"%":""}</b></div>
+    <div class="market">${esc(marketLabel)}<b>${prob}${prob!=="—"?"%":""}</b></div>
   </div>`;
 }
+/* P4A3_MATCHCARD_END */
 function renderHome(){
   const activeSignals=state.signals.filter(s=>isFreshSignal(s));
   const priorities=activeSignals.filter(isFreshPriority).slice(0,4);
   $("#priorityList").innerHTML=priorities.length?priorities.map(signalCard).join(""):empty("Sem prioridade crítica","Nenhum PINNED/JOGO APITADO fresco recebido nos últimos 5 minutos.");
 
-  const prelive=state.matches.filter(isPrelive).sort((a,b)=>new Date(scheduledAt(a)||"2999-01-01")-new Date(scheduledAt(b)||"2999-01-01")).slice(0,8);
+  const preliveAll=state.matches.filter(isPrelive).sort(preliveSort);
+  const prelive=preliveAll.slice(0,Math.max(8,state.preliveVisible||8));
+  const featuredCount=preliveAll.filter(isFeaturedPrelive).length;
+  const remaining=Math.max(0,preliveAll.length-prelive.length);
   const preEl=$("#homePrelive");
-  if(preEl) preEl.innerHTML=prelive.length?prelive.map(matchCard).join(""):empty("Radar pré-live aguardando partidas","O MatchIntel deve receber a agenda do Gateway mesmo sem sinais do Telegram.");
-  const preCount=$("#preliveCount"); if(preCount) preCount.textContent=`${prelive.length} jogo${prelive.length===1?"":"s"}`;
+  if(preEl) preEl.innerHTML=prelive.length?prelive.map(matchCard).join("")+(remaining?`<button class="prelive-more" id="preliveMoreBtn">Ver mais · ${Math.min(8,remaining)} de ${remaining}</button>`:""):empty("Radar pré-live aguardando partidas","O MatchIntel deve receber a agenda do Gateway mesmo sem sinais do Telegram.");
+  const preCount=$("#preliveCount"); if(preCount) preCount.textContent=featuredCount?`${featuredCount} em destaque · ${preliveAll.length} monitorados`:`${preliveAll.length} monitorados`;
 
   const live=state.matches.filter(isFreshLiveMatch).slice(0,8);
   $("#homeLive").innerHTML=live.length?live.map(matchCard).join(""):empty(
@@ -131,9 +181,9 @@ function renderHome(){
   );
   $("#liveCount").textContent=`${live.length} jogo${live.length===1?"":"s"}`;
 
-  const operational=[...prelive,...live];
+  const operational=[...preliveAll,...live];
   const metrics=[
-    ["Pré-live", prelive.length],
+    ["Pré-live", preliveAll.length],
     ["Late Goal", operational.filter(m=>/late/i.test(`${m.best_market} ${m.radar_state}`)).length],
     ["Corner", operational.filter(m=>/corner|escante/i.test(`${m.best_market} ${m.radar_state}`)).length],
     ["Instant", operational.filter(m=>/instant|next|próxim/i.test(`${m.best_market} ${m.radar_state}`)).length],
@@ -142,6 +192,8 @@ function renderHome(){
   ];
   $("#radarCards").innerHTML=metrics.map(([label,n])=>`<div class="card kpi"><div class="label">${esc(label)}</div><div class="value">${n}</div><div class="sub">sessões elegíveis</div></div>`).join("");
   $("#homeSignals").innerHTML=activeSignals.length?activeSignals.slice(0,5).map(signalCard).join(""):empty("Sem sinais ativos","Telegram é evidência adicional; o radar esportivo continua funcionando sozinho.");
+  const moreBtn=$("#preliveMoreBtn");
+  if(moreBtn)moreBtn.onclick=()=>{state.preliveVisible=Math.min(preliveAll.length,(state.preliveVisible||8)+8);renderHome();bindMatchClicks()};
 }
 function filterMatch(m,f){
   if(f==="prelive") return isPrelive(m);
@@ -158,7 +210,7 @@ function filterMatch(m,f){
 }
 function renderLive(){
   const rows=state.matches.filter(m=>filterMatch(m,state.liveFilter)).sort((a,b)=>{
-    if(state.liveFilter==="prelive") return new Date(scheduledAt(a)||"2999-01-01")-new Date(scheduledAt(b)||"2999-01-01");
+    if(state.liveFilter==="prelive") return preliveSort(a,b);
     return Number(b.priority||0)-Number(a.priority||0);
   });
   $("#liveList").innerHTML=rows.length?rows.map(matchCard).join(""):empty(
@@ -227,8 +279,8 @@ function renderSignals(){
   $("#sourceList").innerHTML=sources.map(x=>`<div class="source"><span class="dot" style="${x.on?"":"background:#566663"}"></span><div class="main"><strong>${x.name}</strong><small>${esc(x.sub)}</small></div><span class="pill ${x.on?"ok":x.status==="Aguardando Gateway"?"warn":""}">${esc(x.status)}</span></div>`).join("");
 }
 function renderHistory(){
-  const rows=state.matches.slice().sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)).slice(0,60);
-  $("#historyList").innerHTML=rows.length?rows.map(matchCard).join(""):empty("Histórico vazio","As sessões reais acompanhadas pelo Gateway serão registradas aqui.");
+  const rows=state.matches.filter(isFinishedMatch).sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)).slice(0,60);
+  $("#historyList").innerHTML=rows.length?rows.map(matchCard).join(""):empty("Histórico vazio","Somente partidas encerradas e realmente acompanhadas aparecem aqui.");
 }
 function render(){
   renderStatus();renderHome();renderLive();renderSignals();renderHistory();bindMatchClicks();
@@ -243,15 +295,15 @@ function openMatch(key){
   const stats=m.stats||{}, risks=Array.isArray(m.risks)?m.risks:[];
   const prob=m.best_probability!=null?Math.round(Number(m.best_probability)):null;
   const statPairs=[
-    ["Corners",stats.corners??stats.corner??"—"],["Chutes",stats.shots??stats.total_shots??"—"],
-    ["No alvo",stats.shots_on_goal??stats.sot??"—"],["Vermelhos",stats.red_cards??stats.redCards??"—"]
+    ["Corners",statValue(m,stats.corners??stats.corner)],["Chutes",statValue(m,stats.shots??stats.total_shots)],
+    ["No alvo",statValue(m,stats.shots_on_goal??stats.sot)],["Vermelhos",statValue(m,stats.red_cards??stats.redCards)]
   ];
   $("#matchDetail").innerHTML=`
     <div class="card priority">
       <div class="teams"><strong style="font-size:17px">${esc(m.home)} × ${esc(m.away)}</strong><small>${esc(m.competition||"")}</small></div>
       <div style="display:flex;justify-content:space-between;align-items:end;margin-top:12px">
-        <div><span class="pill ok">${esc(minuteLabel(m.minute,m.phase))}</span> <span class="pill">${esc(m.radar_state||m.state||"")}</span></div>
-        <div class="score">${m.home_score??"—"} – ${m.away_score??"—"}</div>
+        <div><span class="pill ok">${esc(isPrelive(m)?scheduledLabel(m):minuteLabel(m.minute,m.phase))}</span> <span class="pill">${esc(isPrelive(m)?preliveOperationalLabel(m):(m.radar_state||m.state||""))}</span></div>
+        <div class="score">${isPrelive(m)?"—":`${m.home_score??"—"} – ${m.away_score??"—"}`}</div>
       </div>
     </div>
     <div class="section-title"><h2>Melhor leitura</h2><span>Probabilidade ≠ oportunidade</span></div>
@@ -261,7 +313,7 @@ function openMatch(key){
       ${state.status?.shadow_mode?`<span class="badge shadow">Shadow / em calibração</span>`:""}
     </div>
     <div class="section-title"><h2>Qualidade dos dados</h2><span>não é chance de acerto</span></div>
-    <div class="card"><div style="display:flex;justify-content:space-between"><strong>${m.data_quality||0}%</strong><span class="note">${m.independent_sources||0} fonte(s) · ${m.conflicts||0} conflito(s)</span></div><div class="progress" style="margin-top:9px"><i style="width:${Math.max(0,Math.min(100,m.data_quality||0))}%"></i></div><p class="note">${esc(m.source_matrix_state||"Source Matrix sem estado informado.")}</p></div>
+    <div class="card"><div style="display:flex;justify-content:space-between"><strong>${qualityLabel(m)}</strong><span class="note">${m.independent_sources||0} fonte(s) · ${m.conflicts||0} conflito(s)</span></div><div class="progress" style="margin-top:9px"><i style="width:${qualityWidth(m)}%"></i></div><p class="note">${esc(m.source_matrix_state||"Source Matrix sem estado informado.")}</p></div>
     <div class="section-title"><h2>Estatísticas presentes</h2><span>somente campos recebidos</span></div>
     <div class="stats">${statPairs.map(([a,b])=>`<div class="stat"><b>${esc(b)}</b><small>${a}</small></div>`).join("")}</div>
     <div class="section-title"><h2>Por quê / Riscos</h2><span>guardrails</span></div>

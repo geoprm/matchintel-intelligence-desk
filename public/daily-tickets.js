@@ -23,11 +23,24 @@ async function loadTickets(){
   }catch(e){el.innerHTML=`<div class="ticket-empty">Bilhetes indisponíveis agora · ${esc(e.message)}</div>`}
 }
 function card(t){
-  const m=TYPE_META[t.ticket_type]||{icon:'◈',name:t.ticket_type,tone:''};const ready=t.status==='READY'||t.status==='LOCKED'||t.status==='SETTLED';const sels=Array.isArray(t.selections)?t.selections:[];
-  const oddsLabel=t.observed_odds!=null?'Odd observada':'Odd justa';const oddsValue=t.observed_odds!=null?t.observed_odds:t.fair_odds;
-  const status=ready?t.status:'AGUARDANDO BASE';
+  /* P4A3_TICKET_PROGRESS */
+  const m=TYPE_META[t.ticket_type]||{icon:'◈',name:t.ticket_type,tone:''};
+  const ready=t.status==='READY'||t.status==='LOCKED'||t.status==='SETTLED';
+  const sels=Array.isArray(t.selections)?t.selections:[];
+  const oddsLabel=t.observed_odds!=null?'Odd observada':'Odd justa';
+  const oddsValue=t.observed_odds!=null?t.observed_odds:t.fair_odds;
+  const base=Number(t?.metadata?.history?.fixtures??t?.metadata?.historyFixtures??0);
+  const minBase=80;
+  const basePct=Math.max(0,Math.min(100,base/minBase*100));
+  const status=ready?t.status:(base>=minBase?'ANALISANDO PERFIL':'AQUECENDO MODELO');
   const legs=ready?sels.map(s=>`<li><div><strong>${esc(s.home)} × ${esc(s.away)}</strong><small>${esc(s.market_label||s.market)} · ${time(s.kickoff)}</small></div><div class="ticket-leg-prob">${pct(s.probability)}</div></li>`).join(''):'';
-  const info=ready?`<div class="ticket-kpis"><div><small>${oddsLabel}</small><b>${odd(oddsValue)}</b></div><div><small>Prob. combinada</small><b>${pct(t.combined_probability)}</b></div><div><small>Odd mín. valor</small><b>${odd(t.min_value_odds)}</b></div></div><ol class="ticket-legs">${legs}</ol>`:`<p class="ticket-wait">${esc((t.rationale||[])[0]||'Ainda não há evidência suficiente para liberar este perfil.')}</p>`;
-  return `<article class="daily-ticket ${m.tone} ${ready?'ready':'insufficient'}"><div class="ticket-head"><div><span class="ticket-icon">${m.icon}</span><div><strong>${esc(m.name)}</strong><small>${esc(t.model_version||'P4A')}</small></div></div><span class="ticket-status">${esc(status)}</span></div>${info}<div class="ticket-foot"><span>DQ ${Number(t.data_quality||0)}%</span><span>amostra ${Number(t.sample_size||0)}</span><span class="shadow-chip">SHADOW</span></div>${t.ticket_type==='BINGO'&&ready?'<div class="ticket-risk">Alta variância: probabilidade absoluta menor, apesar da seleção orientada por dados.</div>':''}</article>`;
+  const waitingText=base<minBase
+    ?`Base histórica ${base}/${minBase}. O motor libera este perfil automaticamente quando houver amostra e qualidade suficientes.`
+    :'Base mínima atingida. O motor está procurando combinações que também respeitem probabilidade, qualidade e faixa de odd deste perfil.';
+  const info=ready
+    ?`<div class="ticket-kpis"><div><small>${oddsLabel}</small><b>${odd(oddsValue)}</b></div><div><small>Prob. combinada</small><b>${pct(t.combined_probability)}</b></div><div><small>Odd mín. valor</small><b>${odd(t.min_value_odds)}</b></div></div><ol class="ticket-legs">${legs}</ol>`
+    :`<div class="ticket-warmup"><p class="ticket-wait">${esc(waitingText)}</p><div class="ticket-progress"><i style="width:${basePct}%"></i></div><small>${base}/${minBase} fixtures mínimos · SHADOW</small></div>`;
+  const footMiddle=ready?`amostra ${Number(t.sample_size||0)}`:`base ${base}/${minBase}`;
+  return `<article class="daily-ticket ${m.tone} ${ready?'ready':'insufficient'}"><div class="ticket-head"><div><span class="ticket-icon">${m.icon}</span><div><strong>${esc(m.name)}</strong><small>${esc(t.model_version||'P4A')}</small></div></div><span class="ticket-status">${esc(status)}</span></div>${info}<div class="ticket-foot"><span>DQ ${ready?Number(t.data_quality||0)+'%':'—'}</span><span>${footMiddle}</span><span class="shadow-chip">SHADOW</span></div>${t.ticket_type==='BINGO'&&ready?'<div class="ticket-risk">Alta variância: probabilidade absoluta menor, apesar da seleção orientada por dados.</div>':''}</article>`;
 }
 window.addEventListener('DOMContentLoaded',()=>{loadTickets();setInterval(loadTickets,30000)});

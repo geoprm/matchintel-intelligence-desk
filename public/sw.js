@@ -1,4 +1,4 @@
-const CACHE="matchintel-shell-p4a2-v1";
+const CACHE="matchintel-shell-p4a3-v1";
 const ASSETS=["/","/index.html","/styles.css","/app.js","/daily-tickets.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 
 self.addEventListener("install",e=>{
