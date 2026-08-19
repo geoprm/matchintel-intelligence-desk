@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -14,20 +14,23 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand"><div class="logo">MI</div><div><h1>MatchIntel Intelligence Desk</h1><small>Evidence → Consensus → Scenario</small></div></div>
+    <div class="brand"><div class="logo">MI</div><div><h1>MatchIntel Intelligence Desk</h1><small>Evidence â†’ Consensus â†’ Scenario</small></div></div>
     <div class="status-row" id="statusPills"></div>
   </header>
-  <div id="offlineBanner" class="offline hidden">Offline — dados podem estar desatualizados.</div>
+  <div id="offlineBanner" class="offline hidden">Offline â€” dados podem estar desatualizados.</div>
   <button id="installBtn" class="install hidden">Instalar MatchIntel</button>
-  <button id="alertsBtn" class="install alerts">🔔 Ativar alertas críticos</button>
-  <div id="alertsStatus" class="alert-status">Push ainda não configurado neste aparelho.</div>
+  <button id="alertsBtn" class="install alerts">ðŸ”” Ativar alertas crÃ­ticos</button>
+  <div id="alertsStatus" class="alert-status">Push ainda nÃ£o configurado neste aparelho.</div>
 
   <main>
     <section id="home" class="screen active">
-      <div class="section-title"><h2>Prioridade agora</h2><span id="lastSync">—</span></div>
+      <div class="section-title"><h2>Prioridade agora</h2><span id="lastSync">â€”</span></div>
       <div id="priorityList" class="card priority"></div>
 
-      <div class="section-title"><h2>Pré-live</h2><span id="preliveCount">0 jogos</span></div>
+      <div class="section-title"><h2>Bilhetes do dia</h2><span id="dailyTicketsDate">â€”</span></div>
+      <div id="dailyTickets"></div>
+
+      <div class="section-title"><h2>PrÃ©-live</h2><span id="preliveCount">0 jogos</span></div>
       <div id="homePrelive" class="card"></div>
 
       <div class="section-title"><h2>Ao vivo</h2><span id="liveCount">0 jogos</span></div>
@@ -41,12 +44,12 @@
     </section>
 
     <section id="live" class="screen">
-      <div class="section-title"><h2>Radar Autônomo</h2><span>pré-live + live</span></div>
+      <div class="section-title"><h2>Radar AutÃ´nomo</h2><span>prÃ©-live + live</span></div>
       <div class="filters" id="liveFilters">
-        <button class="active" data-filter="all">Ao vivo</button><button data-filter="prelive">Pré-live</button>
+        <button class="active" data-filter="all">Ao vivo</button><button data-filter="prelive">PrÃ©-live</button>
         <button data-filter="goal">Gol</button><button data-filter="corner">Corner</button>
         <button data-filter="instant">Instant</button><button data-filter="HT">HT</button>
-        <button data-filter="2H">2ºT</button><button data-filter="late">Late</button>
+        <button data-filter="2H">2ÂºT</button><button data-filter="late">Late</button>
       </div>
       <div id="liveList" class="card"></div>
     </section>
@@ -55,53 +58,55 @@
       <div class="section-title"><h2>Sinais / Telegram</h2><span id="signalCount">0</span></div>
       <div class="filters" id="signalFilters">
         <button class="active" data-provider="all">Todos</button>
-        <button data-provider="mafia">Chat Máfia</button><button data-provider="betzord">BetZord</button>
+        <button data-provider="mafia">Chat MÃ¡fia</button><button data-provider="betzord">BetZord</button>
       </div>
       <div id="signalList" class="card"></div>
 
-      <div class="section-title"><h2>Fontes / Status</h2><span>não confundir cadastro com conexão</span></div>
+      <div class="section-title"><h2>Fontes / Status</h2><span>nÃ£o confundir cadastro com conexÃ£o</span></div>
       <div id="sourceList" class="card"></div>
     </section>
 
     <section id="history" class="screen">
-      <div class="section-title"><h2>Histórico</h2><span>sessões recentes</span></div>
+      <div class="section-title"><h2>HistÃ³rico</h2><span>sessÃµes recentes</span></div>
       <div id="historyList" class="card"></div>
     </section>
   </main>
 </div>
 
 <nav class="bottom"><div class="bottom-inner">
-  <button class="navbtn active" data-screen="home"><span>⌂</span><span>Início</span></button>
-  <button class="navbtn" data-screen="live"><span>◉</span><span>Ao Vivo</span></button>
+  <button class="navbtn active" data-screen="home"><span>âŒ‚</span><span>InÃ­cio</span></button>
+  <button class="navbtn" data-screen="live"><span>â—‰</span><span>Ao Vivo</span></button>
   <button class="plus" id="plusBtn">+</button>
-  <button class="navbtn" data-screen="signals"><span>⌁</span><span>Sinais</span></button>
-  <button class="navbtn" data-screen="history"><span>◷</span><span>Histórico</span></button>
+  <button class="navbtn" data-screen="signals"><span>âŒ</span><span>Sinais</span></button>
+  <button class="navbtn" data-screen="history"><span>â—·</span><span>HistÃ³rico</span></button>
 </div></nav>
 
 <div id="actionModal" class="modal hidden"><div class="sheet">
-  <div class="sheet-head"><h3>Ações rápidas</h3><button class="close" data-close="actionModal">×</button></div>
+  <div class="sheet-head"><h3>AÃ§Ãµes rÃ¡pidas</h3><button class="close" data-close="actionModal">Ã—</button></div>
   <div class="actions">
-    <button class="action" id="refreshNow"><b>↻ Atualizar agora</b><small>Sincronizar tela com a nuvem</small></button>
-    <button class="action" id="openEvidence"><b>▧ Evidência / Multi‑Print</b><small>Adicionar vários prints à sessão</small></button>
-    <button class="action" data-go-filter="instant"><b>⚡ Instant Markets</b><small>Eventos de curtíssima janela</small></button>
-    <button class="action" data-go-filter="late"><b>⌛ Late Goal</b><small>Radar de gol tardio</small></button>
-    <button class="action" data-go-filter="corner"><b>⚑ Corner 35+</b><small>Pressão pré‑intervalo</small></button>
+    <button class="action" id="refreshNow"><b>â†» Atualizar agora</b><small>Sincronizar tela com a nuvem</small></button>
+    <button class="action" id="openEvidence"><b>â–§ EvidÃªncia / Multiâ€‘Print</b><small>Adicionar vÃ¡rios prints Ã  sessÃ£o</small></button>
+    <button class="action" data-go-filter="instant"><b>âš¡ Instant Markets</b><small>Eventos de curtÃ­ssima janela</small></button>
+    <button class="action" data-go-filter="late"><b>âŒ› Late Goal</b><small>Radar de gol tardio</small></button>
+    <button class="action" data-go-filter="corner"><b>âš‘ Corner 35+</b><small>PressÃ£o prÃ©â€‘intervalo</small></button>
     <button class="action" data-go-filter="late"><b>84:45 Corner/Late</b><small>Janela final calibrada</small></button>
   </div>
 </div></div>
 
 <div id="matchModal" class="modal hidden"><div class="sheet">
-  <div class="sheet-head"><h3>Match Command Center</h3><button class="close" data-close="matchModal">×</button></div>
+  <div class="sheet-head"><h3>Match Command Center</h3><button class="close" data-close="matchModal">Ã—</button></div>
   <div id="matchDetail"></div>
 </div></div>
 
 <div id="evidenceModal" class="modal hidden"><div class="sheet">
-  <div class="sheet-head"><h3>Evidências da partida</h3><button class="close" data-close="evidenceModal">×</button></div>
-  <div class="upload"><label for="evidenceInput">＋ Adicionar imagens / prints</label><small>Múltiplos arquivos. Mantidos localmente no aparelho até você limpar.</small><input id="evidenceInput" type="file" accept="image/*" multiple></div>
+  <div class="sheet-head"><h3>EvidÃªncias da partida</h3><button class="close" data-close="evidenceModal">Ã—</button></div>
+  <div class="upload"><label for="evidenceInput">ï¼‹ Adicionar imagens / prints</label><small>MÃºltiplos arquivos. Mantidos localmente no aparelho atÃ© vocÃª limpar.</small><input id="evidenceInput" type="file" accept="image/*" multiple></div>
   <div class="section-title"><h2>Galeria</h2><span id="evidenceCount">0 adicionados</span></div>
   <div id="evidenceGallery" class="gallery"></div>
-  <p class="note">O módulo de evidência não inventa campos ausentes. A consolidação automática por IA não é ativada para manter custo zero; o sistema usa o Gateway e as fontes reais como núcleo. Os prints permanecem disponíveis para revisão manual/local.</p>
+  <p class="note">O mÃ³dulo de evidÃªncia nÃ£o inventa campos ausentes. A consolidaÃ§Ã£o automÃ¡tica por IA nÃ£o Ã© ativada para manter custo zero; o sistema usa o Gateway e as fontes reais como nÃºcleo. Os prints permanecem disponÃ­veis para revisÃ£o manual/local.</p>
 </div></div>
 
 <script src="/app.js" type="module"></script>
+<script src="/daily-tickets.js" type="module"></script>
 </body></html>
+

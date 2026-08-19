@@ -1,5 +1,5 @@
-const CACHE="matchintel-shell-p2-v10";
-const ASSETS=["/","/index.html","/styles.css","/app.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
+﻿const CACHE="matchintel-shell-p4a-v1";
+const ASSETS=["/","/index.html","/styles.css","/app.js","/daily-tickets.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 
 self.addEventListener("install",e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
@@ -74,3 +74,4 @@ self.addEventListener("notificationclick",event=>{
     })
   );
 });
+
