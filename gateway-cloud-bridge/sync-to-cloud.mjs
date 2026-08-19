@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="1.3-P1";
+const VERSION="1.4-P2";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -24,243 +24,111 @@ const ingestKey=env.MATCHINTEL_INGEST_KEY;
 const every=Math.max(10000,Number(env.MATCHINTEL_SYNC_MS||20000));
 if(!gatewayToken||!ingestUrl||!ingestKey){console.error("[ERRO] Configuracao incompleta.");process.exit(1)}
 
-const stateFile=path.join(here,".data","cloud-bridge-p0.json");
+const stateFile=path.join(here,".data","cloud-bridge-p2.json");
 fs.mkdirSync(path.dirname(stateFile),{recursive:true});
-let seen={version:2,initialized:false,signals:{}};
-try{
-  const old=JSON.parse(fs.readFileSync(stateFile,"utf8"));
-  if(old?.version===2) seen={...seen,...old};
-}catch{}
+let seen={version:3,initialized:false,signals:{}};
+try{const old=JSON.parse(fs.readFileSync(stateFile,"utf8"));if(old?.version===3)seen={...seen,...old}}catch{}
 const saveSeen=()=>{try{fs.writeFileSync(stateFile,JSON.stringify(seen,null,2))}catch{}};
 const sha=s=>crypto.createHash("sha256").update(s).digest("hex");
 const auth={Authorization:`Bearer ${gatewayToken}`};
-
-async function getJson(route){
-  try{
-    const r=await fetch(gatewayUrl+route,{headers:auth,signal:AbortSignal.timeout(8000)});
-    return r.ok?await r.json():null;
-  }catch{return null}
-}
-const firstArray=(o,keys)=>{for(const k of keys)if(Array.isArray(o?.[k]))return o[k];return[]};
 const text=(...xs)=>xs.find(x=>typeof x==="string"&&x.trim())||null;
 const num=(...xs)=>{const x=xs.find(v=>v!==null&&v!==undefined&&v!==""&&!Number.isNaN(Number(v)));return x===undefined?null:Number(x)};
 
-function sourceEventId(s){
-  const v=s.source_event_id??s.sourceEventId??s.telegram_message_id??s.telegramMessageId??s.message_id??s.messageId??s.msg_id??s.msgId;
-  return v===null||v===undefined||v===""?null:String(v);
+async function getJson(route){
+  try{
+    const r=await fetch(gatewayUrl+route,{headers:auth,signal:AbortSignal.timeout(5000)});
+    if(!r.ok)return null;
+    return await r.json();
+  }catch{return null}
 }
-function parseSourceTime(s){
-  // Intentionally avoid generic poll/detected timestamps. Prefer upstream message time.
-  const raw=text(s.source_occurred_at,s.sourceOccurredAt,s.telegramDate,s.messageDate,s.sentAt,s.date,s.occurred_at,s.occurredAt);
-  if(!raw) return null;
-  const d=new Date(raw);
-  return Number.isFinite(d.getTime())?d.toISOString():null;
-}
-
-function extractUrls(s){
-  const values=[
-    s.bookmaker_url,s.bookmakerUrl,s.bet365_url,s.bet365Url,s.betano_url,s.betanoUrl,
-    s.game_link,s.gameLink,s.link,s.url,s.raw_url,s.rawUrl,
-    s.text,s.message,s.summary,s.text_summary,s.caption,s.rawText
-  ].filter(v=>typeof v==="string");
-  const urls=[];
-  for(const v of values){
-    if(/^https?:\/\//i.test(v.trim())) urls.push(v.trim());
-    for(const m of v.matchAll(/https?:\/\/[^\s<>"')\]]+/gi)) urls.push(m[0].replace(/[.,;!?]+$/,""));
+function firstArray(o,keys){for(const k of keys)if(Array.isArray(o?.[k]))return o[k];return[]}
+function teamName(x){return text(x?.name,x?.team?.name,typeof x==="string"?x:null)}
+function extractHome(o){return text(o?.home,o?.home_name,o?.teamHome,teamName(o?.homeTeam),teamName(o?.teams?.home),teamName(o?.participants?.home),teamName(o?.fixture?.teams?.home))}
+function extractAway(o){return text(o?.away,o?.away_name,o?.teamAway,teamName(o?.awayTeam),teamName(o?.teams?.away),teamName(o?.participants?.away),teamName(o?.fixture?.teams?.away))}
+function looksLikeMatch(o){if(!o||typeof o!=="object"||Array.isArray(o))return false;return !!(extractHome(o)&&extractAway(o))}
+function deepMatches(root,maxDepth=7){
+  const out=[];const visited=new Set();
+  function walk(v,d){
+    if(v===null||v===undefined||d>maxDepth)return;
+    if(typeof v!=="object")return;
+    if(visited.has(v))return;visited.add(v);
+    if(looksLikeMatch(v))out.push(v);
+    if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}
+    for(const [k,x] of Object.entries(v)){
+      if(["stats","statistics","sourceMatrix","source_matrix","risks","events","timeline","payload"].includes(k)&&d>2) continue;
+      walk(x,d+1);
+    }
   }
-  return [...new Set(urls)];
+  walk(root,0);return out;
 }
-function allowedBookmakerUrl(s){
-  const kind=`${s.provider_family||s.providerFamily||s.family||s.provider||""} ${s.provider_name||s.providerName||s.chatName||s.source||""}`.toLowerCase();
-  const mafia=kind.includes("mafia")||kind.includes("máfia");
-  const betzord=kind.includes("betzord");
-  for(const raw of extractUrls(s)){
-    try{
-      const u=new URL(raw); if(u.protocol!=="https:")continue;
-      const h=u.hostname.toLowerCase();
-      if(mafia && (h==="bet365.bet.br"||h.endsWith(".bet365.bet.br")||h==="bet365.com"||h.endsWith(".bet365.com"))){
-        return {bookmaker:"BET365",bookmaker_url:u.href};
+function findFlag(root,patterns){
+  let found=null;const visited=new Set();
+  function walk(v,d){
+    if(found!==null||v===null||v===undefined||d>6||typeof v!=="object")return;
+    if(visited.has(v))return;visited.add(v);
+    if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}
+    for(const [k,x] of Object.entries(v)){
+      const key=k.toLowerCase().replace(/[_-]/g,"");
+      if(patterns.some(p=>key.includes(p))){
+        if(typeof x==="boolean"){found=x;return}
+        if(x&&typeof x==="object" && typeof x.active==="boolean"){found=x.active;return}
+        if(typeof x==="string" && /^(active|ativo|on|true|running)$/i.test(x)){found=true;return}
       }
-      if(betzord && (h==="betano.bet.br"||h.endsWith(".betano.bet.br")||h==="betanobr.com"||h.endsWith(".betanobr.com"))){
-        return {bookmaker:"BETANO",bookmaker_url:u.href};
-      }
-    }catch{}
+      walk(x,d+1);
+    }
   }
-  if(betzord) return {bookmaker:"BETANO",bookmaker_url:"https://www.betano.bet.br/"};
-  if(mafia) return {bookmaker:"BET365",bookmaker_url:null};
-  return {bookmaker:null,bookmaker_url:null};
+  walk(root,0);return found;
 }
-function sigFingerprint(s){
-  const sid=sourceEventId(s);
-  return sha([
-    text(s.provider_family,s.providerFamily,s.family,s.provider)||"",
-    text(s.provider_name,s.providerName,s.chatName,s.source,s.provider)||"",
-    sid||"",
-    text(s.match_key,s.matchKey,s.match?.key)||"",
-    text(s.signal_type,s.signalType,s.type,s.label)||"",
-    text(s.market,s.parsed?.market)||"",
-    text(s.text_summary,s.summary,s.text,s.message)||"",
-    Boolean(s.pinned||s.isPinned)?"1":"0"
-  ].join("|").toLowerCase().replace(/\s+/g," "));
-}
-function retireAbsentSignals(current){
-  const now=Date.now();
-  for(const [fp,rec] of Object.entries(seen.signals)){
-    if(current.has(fp)){rec.absentTicks=0;continue}
-    rec.absentTicks=(rec.absentTicks||0)+1;
-    // Baseline snapshots become eligible to be considered new only after they
-    // disappeared for at least two sync cycles. This stops a pinned stale
-    // snapshot from becoming "new" after a restart.
-    if(rec.baselineBlocked && rec.absentTicks>=2) delete seen.signals[fp];
-    else if(now-new Date(rec.lastSeenAt||rec.firstSeenAt||0).getTime()>2*24*60*60*1000) delete seen.signals[fp];
-  }
-}
-function normalizeSignal(s,baselineOnly=false){
-  const fp=sigFingerprint(s);
-  const nowIso=new Date().toISOString();
-  const sourceTime=parseSourceTime(s);
-  let rec=seen.signals[fp];
-  if(!rec){
-    rec=seen.signals[fp]={
-      firstSeenAt:sourceTime||nowIso,lastSeenAt:nowIso,
-      sourceEventId:sourceEventId(s),baselineBlocked:false,forwardedAt:null,absentTicks:0
-    };
-  }else{
-    rec.lastSeenAt=nowIso; rec.absentTicks=0;
-  }
+function sourceEventId(s){const v=s.source_event_id??s.sourceEventId??s.telegram_message_id??s.telegramMessageId??s.message_id??s.messageId??s.msg_id??s.msgId;return v===null||v===undefined||v===""?null:String(v)}
+function parseSourceTime(s){const raw=text(s.source_occurred_at,s.sourceOccurredAt,s.telegramDate,s.messageDate,s.sentAt,s.date,s.occurred_at,s.occurredAt);if(!raw)return null;const d=new Date(raw);return Number.isFinite(d.getTime())?d.toISOString():null}
+function extractUrls(s){const values=[s.bookmaker_url,s.bookmakerUrl,s.bet365_url,s.bet365Url,s.betano_url,s.betanoUrl,s.game_link,s.gameLink,s.link,s.url,s.raw_url,s.rawUrl,s.text,s.message,s.summary,s.text_summary,s.caption,s.rawText].filter(v=>typeof v==="string");const urls=[];for(const v of values){if(/^https?:\/\//i.test(v.trim()))urls.push(v.trim());for(const m of v.matchAll(/https?:\/\/[^\s<>"')\]]+/gi))urls.push(m[0].replace(/[.,;!?]+$/, ""))}return [...new Set(urls)]}
+function allowedBookmakerUrl(s){const kind=`${s.provider_family||s.providerFamily||s.family||s.provider||""} ${s.provider_name||s.providerName||s.chatName||s.source||""}`.toLowerCase();const mafia=kind.includes("mafia")||kind.includes("máfia");const betzord=kind.includes("betzord");for(const raw of extractUrls(s)){try{const u=new URL(raw);if(u.protocol!=="https:")continue;const h=u.hostname.toLowerCase();if(mafia&&(h==="bet365.bet.br"||h.endsWith(".bet365.bet.br")||h==="bet365.com"||h.endsWith(".bet365.com")))return{bookmaker:"BET365",bookmaker_url:u.href};if(betzord&&(h==="betano.bet.br"||h.endsWith(".betano.bet.br")||h==="betanobr.com"||h.endsWith(".betanobr.com")))return{bookmaker:"BETANO",bookmaker_url:u.href}}catch{}}if(betzord)return{bookmaker:"BETANO",bookmaker_url:"https://www.betano.bet.br/"};if(mafia)return{bookmaker:"BET365",bookmaker_url:null};return{bookmaker:null,bookmaker_url:null}}
+function sigFingerprint(s){return sha([text(s.provider_family,s.providerFamily,s.family,s.provider)||"",text(s.provider_name,s.providerName,s.chatName,s.source,s.provider)||"",sourceEventId(s)||"",text(s.match_key,s.matchKey,s.match?.key)||"",text(s.signal_type,s.signalType,s.type,s.label)||"",text(s.market,s.parsed?.market)||"",text(s.text_summary,s.summary,s.text,s.message)||"",Boolean(s.pinned||s.isPinned)?"1":"0"].join("|").toLowerCase().replace(/\s+/g," "))}
+function retireAbsentSignals(current){const now=Date.now();for(const [fp,rec] of Object.entries(seen.signals)){if(current.has(fp)){rec.absentTicks=0;continue}rec.absentTicks=(rec.absentTicks||0)+1;if(rec.baselineBlocked&&rec.absentTicks>=2)delete seen.signals[fp];else if(now-new Date(rec.lastSeenAt||rec.firstSeenAt||0).getTime()>2*24*60*60*1000)delete seen.signals[fp]}}
+function normalizeSignal(s,baselineOnly=false){const fp=sigFingerprint(s);const nowIso=new Date().toISOString();const sourceTime=parseSourceTime(s);let rec=seen.signals[fp];if(!rec)rec=seen.signals[fp]={firstSeenAt:sourceTime||nowIso,lastSeenAt:nowIso,sourceEventId:sourceEventId(s),baselineBlocked:false,forwardedAt:null,absentTicks:0};else{rec.lastSeenAt=nowIso;rec.absentTicks=0}if(baselineOnly){rec.baselineBlocked=true;return null}if(rec.baselineBlocked||rec.forwardedAt)return null;const occurred=sourceTime||rec.firstSeenAt;const age=Date.now()-new Date(occurred).getTime();if(!Number.isFinite(age)||age>SIGNAL_TTL_MS||age<-FUTURE_TOLERANCE_MS){rec.staleBlocked=true;return null}rec.forwardedAt=nowIso;const book=allowedBookmakerUrl(s);return{match_key:text(s.match_key,s.matchKey,s.match?.key),provider_family:text(s.provider_family,s.providerFamily,s.family,s.provider)||"unknown",provider_name:text(s.provider_name,s.providerName,s.chatName,s.source,s.provider)||"unknown",signal_type:text(s.signal_type,s.signalType,s.type,s.label)||"SIGNAL",market:text(s.market,s.parsed?.market),text_summary:text(s.text_summary,s.summary,s.text,s.message),state:text(s.state,s.status,s.priorityState)||"WATCH",pinned:Boolean(s.pinned||s.isPinned),author_role:text(s.author_role,s.authorRole),occurred_at:occurred,source_event_id:sourceEventId(s),bookmaker:book.bookmaker,bookmaker_url:book.bookmaker_url}}
+function rawState(m){return text(m.state,m.matchState,m.status?.short,typeof m.status==="string"?m.status:null,m.phase,m.period,m.fixture?.status?.short)||"WATCH"}
+function mapState(s){const x=String(s||"").toUpperCase();if(["1H","HT","2H","ET","P","LIVE","BT"].includes(x))return"LIVE";if(["NS","TBD","PRE","SCHEDULED","UPCOMING","WATCH"].includes(x))return"PRELIVE";if(["FT","AET","PEN"].includes(x))return"FINISHED";if(["PST","CANC","ABD","AWD","WO"].includes(x))return x;return x||"WATCH"}
+function scheduledAt(m){return text(m.scheduled_at,m.scheduledAt,m.start_time,m.startTime,m.date,m.fixture?.date,m.kickoff,m.kickOff,m.timestamp?new Date(Number(m.timestamp)*1000).toISOString():null)}
+function normalizeMatch(m){const home=extractHome(m),away=extractAway(m);if(!home||!away)return null;const providerId=m.provider_match_id??m.fixture?.id??m.id??m.matchId??null;const decision=m.bestDecision||m.decision||m.opportunity||m.shadowDecision||{};const sourceState=rawState(m),state=mapState(sourceState),sched=scheduledAt(m);const baseStats=m.stats||m.statistics||m.liveStats||{};const stats={...(baseStats&&typeof baseStats==="object"&&!Array.isArray(baseStats)?baseStats:{}),_matchintel:{scheduledAt:sched,sourceState,discoveredBy:"bridge-p2"}};return{match_key:text(m.match_key,m.matchKey,m.key,providerId!=null?`api:${providerId}`:null,`${home}::${away}`.toLowerCase().replace(/\s+/g,"_")),provider_match_id:providerId!=null?String(providerId):null,home,away,competition:text(m.competition,m.league?.name,m.tournament?.name,m.fixture?.league?.name,typeof m.league==="string"?m.league:null),state,radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state,m.trackingState,state==="PRELIVE"?"PRE-LIVE RADAR":null),minute:num(m.minute,m.elapsed,m.status?.elapsed,m.clock?.minute,m.fixture?.status?.elapsed),phase:text(m.phase,m.period,m.status?.short,m.fixture?.status?.short,sourceState),home_score:num(m.home_score,m.homeScore,m.score?.home,m.goals?.home,m.fixture?.goals?.home),away_score:num(m.away_score,m.awayScore,m.score?.away,m.goals?.away,m.fixture?.goals?.away),data_quality:num(m.data_quality,m.dataQuality,m.dqi,m.DQI)||0,independent_sources:num(m.independent_sources,m.independentSources,m.sourceMatrix?.independentSources)||0,source_matrix_state:text(m.source_matrix_state,m.sourceMatrixState,m.sourceMatrix?.state),conflicts:num(m.conflicts,m.sourceMatrix?.conflicts)||0,best_market:text(m.best_market,decision.market,decision.bestMarket,m.market),best_level:text(m.best_level,decision.level,decision.classification,m.level),best_probability:num(m.best_probability,decision.probability,decision.score,m.probability),best_explanation:text(m.best_explanation,decision.explanation,decision.why,m.explanation),priority:num(m.priority,m.adaptiveFocus?.priority,m.candidateScore),refresh_seconds:num(m.refresh_seconds,m.adaptiveFocus?.refreshSeconds),origin:text(m.origin,m.source,"gateway-autonomous"),stats,source_matrix:m.source_matrix||m.sourceMatrix||{},risks:Array.isArray(m.risks||decision.risks)?(m.risks||decision.risks):[],updated_at:new Date().toISOString()}}
+function dedupeMatches(rows){const map=new Map();for(const m of rows.map(normalizeMatch).filter(Boolean)){const key=m.provider_match_id?`id:${m.provider_match_id}`:`${m.home}|${m.away}|${m.stats?._matchintel?.scheduledAt||""}`.toLowerCase();const old=map.get(key);if(!old||Number(m.priority||0)>=Number(old.priority||0))map.set(key,m)}return[...map.values()]}
+function normalizeEvent(e){const event_type=text(e.event_type,e.eventType,e.type,e.name);if(!event_type)return null;return{match_key:text(e.match_key,e.matchKey),event_type,side:text(e.side,e.team),observed_minute:num(e.observed_minute,e.observedMinute,e.minute),detected_at:text(e.detected_at,e.detectedAt,e.timestamp,new Date().toISOString()),payload:e.payload||e}}
 
-  // FIRST CYCLE IS ALWAYS BASELINE. Even if the local snapshot claims a recent
-  // timestamp, it existed before this bridge started and cannot be called new.
-  if(baselineOnly){
-    rec.baselineBlocked=true;
-    return null;
-  }
-  if(rec.baselineBlocked || rec.forwardedAt) return null;
-
-  const occurred=sourceTime||rec.firstSeenAt;
-  const age=Date.now()-new Date(occurred).getTime();
-  if(!Number.isFinite(age) || age>SIGNAL_TTL_MS || age<-FUTURE_TOLERANCE_MS){
-    rec.staleBlocked=true;
-    return null;
-  }
-
-  rec.forwardedAt=nowIso;
-  const book=allowedBookmakerUrl(s);
-  return {
-    match_key:text(s.match_key,s.matchKey,s.match?.key),
-    provider_family:text(s.provider_family,s.providerFamily,s.family,s.provider)||"unknown",
-    provider_name:text(s.provider_name,s.providerName,s.chatName,s.source,s.provider)||"unknown",
-    signal_type:text(s.signal_type,s.signalType,s.type,s.label)||"SIGNAL",
-    market:text(s.market,s.parsed?.market),
-    text_summary:text(s.text_summary,s.summary,s.text,s.message),
-    state:text(s.state,s.status,s.priorityState)||"WATCH",
-    pinned:Boolean(s.pinned||s.isPinned),
-    author_role:text(s.author_role,s.authorRole),
-    occurred_at:occurred,
-    source_event_id:sourceEventId(s),
-    bookmaker:book.bookmaker,
-    bookmaker_url:book.bookmaker_url
-  };
-}
-function normalizeMatch(m){
-  const home=text(m.home,m.homeTeam?.name,m.teams?.home?.name,m.teamHome,m.home_name);
-  const away=text(m.away,m.awayTeam?.name,m.teams?.away?.name,m.teamAway,m.away_name);
-  if(!home||!away)return null;
-  const providerId=m.provider_match_id??m.fixture?.id??m.id??null;
-  const decision=m.bestDecision||m.decision||m.opportunity||m.shadowDecision||{};
-  return {
-    match_key:text(m.match_key,m.matchKey,m.key,providerId!=null?`api:${providerId}`:null,`${home}::${away}`.toLowerCase().replace(/\s+/g,"_")),
-    provider_match_id:providerId!=null?String(providerId):null,home,away,
-    competition:text(m.competition,m.league?.name,m.tournament?.name,typeof m.league==="string"?m.league:null),
-    state:text(m.state,m.status?.short,typeof m.status==="string"?m.status:null,m.matchState)||"WATCH",
-    radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state),
-    minute:num(m.minute,m.elapsed,m.status?.elapsed,m.clock?.minute),
-    phase:text(m.phase,m.period,m.status?.short),
-    home_score:num(m.home_score,m.homeScore,m.score?.home,m.goals?.home),
-    away_score:num(m.away_score,m.awayScore,m.score?.away,m.goals?.away),
-    data_quality:num(m.data_quality,m.dataQuality,m.dqi,m.DQI)||0,
-    independent_sources:num(m.independent_sources,m.independentSources,m.sourceMatrix?.independentSources)||0,
-    source_matrix_state:text(m.source_matrix_state,m.sourceMatrixState,m.sourceMatrix?.state),
-    conflicts:num(m.conflicts,m.sourceMatrix?.conflicts)||0,
-    best_market:text(m.best_market,decision.market,decision.bestMarket,m.market),
-    best_level:text(m.best_level,decision.level,decision.classification,m.level),
-    best_probability:num(m.best_probability,decision.probability,decision.score,m.probability),
-    best_explanation:text(m.best_explanation,decision.explanation,decision.why,m.explanation),
-    priority:num(m.priority,m.adaptiveFocus?.priority),
-    refresh_seconds:num(m.refresh_seconds,m.adaptiveFocus?.refreshSeconds),
-    origin:text(m.origin,m.source,"gateway"),
-    stats:m.stats||m.statistics||m.liveStats||{},
-    source_matrix:m.source_matrix||m.sourceMatrix||{},
-    risks:Array.isArray(m.risks||decision.risks)?(m.risks||decision.risks):[],
-    updated_at:new Date().toISOString()
-  };
-}
-function normalizeEvent(e){
-  const event_type=text(e.event_type,e.eventType,e.type,e.name);
-  if(!event_type)return null;
-  return {
-    match_key:text(e.match_key,e.matchKey),event_type,side:text(e.side,e.team),
-    observed_minute:num(e.observed_minute,e.observedMinute,e.minute),
-    detected_at:text(e.detected_at,e.detectedAt,e.timestamp,new Date().toISOString()),
-    payload:e.payload||e
-  };
-}
+const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/prelive","/live","/focus","/scanner","/auto-scan"];
 async function tick(){
-  const [radar,signalsR,statusR,eventsR]=await Promise.all([
-    getJson("/radar"),getJson("/signals"),getJson("/status"),getJson("/events")
-  ]);
-  if(!radar&&!statusR){
-    console.log(new Date().toLocaleTimeString(),"Gateway indisponivel; aguardando...");
-    return;
-  }
+  const routes=await Promise.all(discoveryRoutes.map(async route=>[route,await getJson(route)]));
+  const routeMap=Object.fromEntries(routes);
+  const [signalsR,statusR,eventsR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events")]);
+  const radar=routeMap["/radar"];
+  if(!radar&&!statusR&&!routes.some(([,v])=>v)){console.log(new Date().toLocaleTimeString(),"Gateway indisponivel; aguardando...");return}
 
-  const matchesRaw=firstArray(radar,["matches","live","sessions","matchSessions","items","radar"]);
-  const signalsRaw=[...firstArray(radar,["signals","telegramSignals"]),...firstArray(signalsR,["signals","items","data"])];
+  const matchCandidates=[];const sourceCounts={};
+  for(const [route,payload] of routes){if(!payload)continue;const found=deepMatches(payload);sourceCounts[route]=found.length;matchCandidates.push(...found)}
+  const matches=dedupeMatches(matchCandidates);
+  const signalsRaw=[...deepSignalArrays(radar),...firstArray(signalsR,["signals","items","data"])];
   const eventsRaw=[...firstArray(radar,["events","timeline"]),...firstArray(eventsR,["events","items","data"])];
-
-  const currentFps=new Set(signalsRaw.map(sigFingerprint));
-  retireAbsentSignals(currentFps);
-
+  const currentFps=new Set(signalsRaw.map(sigFingerprint));retireAbsentSignals(currentFps);
   const baselineOnly=!seen.initialized;
-  const matches=matchesRaw.map(normalizeMatch).filter(Boolean);
   const signals=signalsRaw.map(s=>normalizeSignal(s,baselineOnly)).filter(Boolean);
   const events=eventsRaw.map(normalizeEvent).filter(Boolean);
+  seen.initialized=true;saveSeen();
 
-  seen.initialized=true;
-  saveSeen();
+  const aggregate={...routeMap,"/status":statusR};
+  const telegramEvidence=Boolean(statusR?.telegram_connected??statusR?.telegramConnected??radar?.telegramConnected)||signalsRaw.length>0;
+  const scanFlag=findFlag(aggregate,["autoscan","scanneractive","scanactive","radaractive"]);
+  const provider=text(statusR?.api_provider,statusR?.apiProvider,radar?.apiProvider,"API-Football");
+  const prelive=matches.filter(m=>m.state==="PRELIVE").length,live=matches.filter(m=>m.state==="LIVE").length;
+  const status={id:"main",gateway_online:true,telegram_connected:telegramEvidence,auto_scan_active:scanFlag===null?(matches.length>0):scanFlag,shadow_mode:Boolean(statusR?.shadow_mode??statusR?.shadowMode??radar?.shadowMode??true),api_provider:provider,quota_daily_remaining:num(statusR?.quota_daily_remaining,statusR?.quotaDailyRemaining,radar?.quotaDailyRemaining),independent_sources:num(statusR?.independent_sources,statusR?.independentSources,radar?.independentSources)||0,last_sync_at:new Date().toISOString(),version:`${text(statusR?.version,radar?.version,"gateway")}|bridge-${VERSION}`};
 
-  const ss=statusR||radar?.status||{};
-  const telegramEvidence=Boolean(ss.telegram_connected??ss.telegramConnected??radar?.telegramConnected) || signalsRaw.length>0;
-  const status={
-    id:"main",gateway_online:true,
-    telegram_connected:telegramEvidence,
-    auto_scan_active:Boolean(ss.auto_scan_active??ss.autoScanActive??radar?.autoScanActive),
-    shadow_mode:Boolean(ss.shadow_mode??ss.shadowMode??radar?.shadowMode??true),
-    api_provider:text(ss.api_provider,ss.apiProvider,radar?.apiProvider,"API-Football"),
-    quota_daily_remaining:num(ss.quota_daily_remaining,ss.quotaDailyRemaining,radar?.quotaDailyRemaining),
-    independent_sources:num(ss.independent_sources,ss.independentSources,radar?.independentSources)||0,
-    last_sync_at:new Date().toISOString(),
-    version:`${text(ss.version,radar?.version,"gateway")}|bridge-${VERSION}`
-  };
-
-  const r=await fetch(ingestUrl,{
-    method:"POST",
-    headers:{"content-type":"application/json","x-matchintel-key":ingestKey},
-    body:JSON.stringify({matches,events,signals,status}),
-    signal:AbortSignal.timeout(12000)
-  });
-  const raw=await r.text();
-  if(!r.ok) throw new Error(`Cloud ${r.status}: ${raw}`);
-  let cloud={}; try{cloud=JSON.parse(raw)}catch{}
-  const dropped=cloud?.dropped||{};
-  console.log(
-    new Date().toLocaleTimeString(),
-    `P1 sync OK | matches=${matches.length} signals=${signals.length} events=${events.length}`+
-    `${baselineOnly?" | BASELINE BLOQUEADA":""}`+
-    `${dropped.signals_stale?` | cloud stale=${dropped.signals_stale}`:""}`
-  );
+  const r=await fetch(ingestUrl,{method:"POST",headers:{"content-type":"application/json","x-matchintel-key":ingestKey},body:JSON.stringify({matches,events,signals,status}),signal:AbortSignal.timeout(12000)});
+  const raw=await r.text();if(!r.ok)throw new Error(`Cloud ${r.status}: ${raw}`);
+  let cloud={};try{cloud=JSON.parse(raw)}catch{}
+  console.log(new Date().toLocaleTimeString(),`P2 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} events=${events.length}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
+  if(activeRoutes)console.log("  radar sources ->",activeRoutes);
 }
+function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P0 freshness + P1 bookmaker links | intervalo ${every/1000}s`);
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | AUTONOMOUS RADAR DISCOVERY | intervalo ${every/1000}s`);
+console.log("P2 nao faz chamadas extras a API-Football: ele descobre e publica o estado ja produzido pelo Gateway.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

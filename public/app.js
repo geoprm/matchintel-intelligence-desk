@@ -11,9 +11,16 @@ const empty=(title,body)=>`<div class="empty"><div class="icon">◌</div><h3>${e
 const fmtTime=(d)=>{try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"})}catch{return "—"}};
 const minuteLabel=(m,phase)=>m!=null?`${m}'`:(phase||"—");
 const isLive=(m)=>["LIVE","1H","HT","2H","ET","P"].includes(String(m.state||m.phase||"").toUpperCase());
+const isPrelive=(m)=>{
+  const s=String(m.state||m.phase||"").toUpperCase();
+  return ["PRELIVE","PRE","NS","TBD","SCHEDULED","WATCH","UPCOMING"].includes(s) || (!!scheduledAt(m) && !isLive(m) && !/[FCA]T|FINISHED|CANC|ABD|PST/i.test(s));
+};
+const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
+const scheduledLabel=(m)=>{const d=scheduledAt(m);if(!d)return m.phase||m.state||"Pré-live";try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit"})}catch{return "Pré-live"}};
 
 const P0_VERSION="p0-freshness-v1.2";
-const P1_VERSION="p1-push-v1.0";
+const P1_VERSION="p1-push-v1.0.1";
+const P2_VERSION="p2-autonomous-radar-v1.0";
 const VAPID_PUBLIC_KEY="BGaSDtAPm1iwLkjlsti4WsrCW5xIlp_Nc5dgNniZv2UMyL6qxgKBJlNi-cJBShyZRhfWc-DIFdU32Oj-RGH61Qw";
 const PUSH_SUBSCRIBE_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-subscribe";
 const PUSH_TEST_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-test";
@@ -98,8 +105,9 @@ function renderStatus(){
 function matchCard(m){
   const score=(m.home_score!=null&&m.away_score!=null)?`${m.home_score}–${m.away_score}`:"—";
   const prob=m.best_probability!=null?Math.round(Number(m.best_probability)):"—";
+  const clock=isPrelive(m)?scheduledLabel(m):minuteLabel(m.minute,m.phase);
   return `<div class="match" data-match="${esc(m.match_key)}">
-    <div class="minute">${esc(minuteLabel(m.minute,m.phase))}</div>
+    <div class="minute">${esc(clock)}</div>
     <div class="teams"><strong>${esc(m.home)} × ${esc(m.away)}</strong><small>${esc(m.competition||m.radar_state||m.state||"")}</small></div>
     <div class="score">${score}</div>
     <div class="market">${esc(m.best_market||m.radar_state||"")}<b>${prob}${prob!=="—"?"%":""}</b></div>
@@ -109,26 +117,33 @@ function renderHome(){
   const activeSignals=state.signals.filter(s=>isFreshSignal(s));
   const priorities=activeSignals.filter(isFreshPriority).slice(0,4);
   $("#priorityList").innerHTML=priorities.length?priorities.map(signalCard).join(""):empty("Sem prioridade crítica","Nenhum PINNED/JOGO APITADO fresco recebido nos últimos 5 minutos.");
-  const live=state.matches.filter(isFreshLiveMatch).slice(0,6);
+
+  const prelive=state.matches.filter(isPrelive).sort((a,b)=>new Date(scheduledAt(a)||"2999-01-01")-new Date(scheduledAt(b)||"2999-01-01")).slice(0,8);
+  const preEl=$("#homePrelive");
+  if(preEl) preEl.innerHTML=prelive.length?prelive.map(matchCard).join(""):empty("Radar pré-live aguardando partidas","O MatchIntel deve receber a agenda do Gateway mesmo sem sinais do Telegram.");
+  const preCount=$("#preliveCount"); if(preCount) preCount.textContent=`${prelive.length} jogo${prelive.length===1?"":"s"}`;
+
+  const live=state.matches.filter(isFreshLiveMatch).slice(0,8);
   $("#homeLive").innerHTML=live.length?live.map(matchCard).join(""):empty(
     gatewayFresh()?"Nenhum jogo ao vivo no relay":"Gateway sem atualização",
-    gatewayFresh()?"Quando o Gateway encontrar partidas reais, elas aparecem aqui.":"Partidas antigas ficam bloqueadas até uma nova sincronização."
+    gatewayFresh()?"O radar autônomo continuará procurando partidas independentemente do Telegram.":"Partidas antigas ficam bloqueadas até uma nova sincronização."
   );
   $("#liveCount").textContent=`${live.length} jogo${live.length===1?"":"s"}`;
 
-  const freshMatches=state.matches.filter(m=>!isLive(m) || isFreshLiveMatch(m));
+  const operational=[...prelive,...live];
   const metrics=[
-    ["Late Goal", freshMatches.filter(m=>/late/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["Corner", freshMatches.filter(m=>/corner|escante/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["Instant", freshMatches.filter(m=>/instant|next|próxim/i.test(`${m.best_market} ${m.radar_state}`)).length],
-    ["HT / Goal HT", freshMatches.filter(m=>/ht|1h/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
-    ["2º Tempo", freshMatches.filter(m=>/2h|2º|segundo/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
-    ["Chaos / Ruptura", freshMatches.filter(m=>/chaos|ruptur|nuclear/i.test(`${m.radar_state} ${m.best_market}`)).length],
+    ["Pré-live", prelive.length],
+    ["Late Goal", operational.filter(m=>/late/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["Corner", operational.filter(m=>/corner|escante/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["Instant", operational.filter(m=>/instant|next|próxim/i.test(`${m.best_market} ${m.radar_state}`)).length],
+    ["HT / Goal HT", operational.filter(m=>/ht|1h/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
+    ["2º Tempo", operational.filter(m=>/2h|2º|segundo/i.test(`${m.best_market} ${m.phase} ${m.radar_state}`)).length],
   ];
   $("#radarCards").innerHTML=metrics.map(([label,n])=>`<div class="card kpi"><div class="label">${esc(label)}</div><div class="value">${n}</div><div class="sub">sessões elegíveis</div></div>`).join("");
-  $("#homeSignals").innerHTML=activeSignals.length?activeSignals.slice(0,5).map(signalCard).join(""):empty("Sem sinais ativos","Sinais com mais de 10 minutos não aparecem como atuais.");
+  $("#homeSignals").innerHTML=activeSignals.length?activeSignals.slice(0,5).map(signalCard).join(""):empty("Sem sinais ativos","Telegram é evidência adicional; o radar esportivo continua funcionando sozinho.");
 }
 function filterMatch(m,f){
+  if(f==="prelive") return isPrelive(m);
   if(!isFreshLiveMatch(m)) return false;
   const t=`${m.best_market||""} ${m.radar_state||""} ${m.phase||""}`.toLowerCase();
   if(f==="all") return true;
@@ -141,10 +156,13 @@ function filterMatch(m,f){
   return true;
 }
 function renderLive(){
-  const rows=state.matches.filter(m=>filterMatch(m,state.liveFilter));
+  const rows=state.matches.filter(m=>filterMatch(m,state.liveFilter)).sort((a,b)=>{
+    if(state.liveFilter==="prelive") return new Date(scheduledAt(a)||"2999-01-01")-new Date(scheduledAt(b)||"2999-01-01");
+    return Number(b.priority||0)-Number(a.priority||0);
+  });
   $("#liveList").innerHTML=rows.length?rows.map(matchCard).join(""):empty(
-    gatewayFresh()?"Nenhum jogo neste filtro":"Gateway sem atualização",
-    gatewayFresh()?"O filtro mostra somente partidas reais e frescas.":"Nenhuma partida antiga é tratada como ao vivo."
+    state.liveFilter==="prelive"?"Nenhuma partida pré-live recebida":(gatewayFresh()?"Nenhum jogo neste filtro":"Gateway sem atualização"),
+    state.liveFilter==="prelive"?"O Bridge P2 procura Match Sessions e agenda em múltiplas rotas locais do Gateway.":(gatewayFresh()?"O filtro mostra somente partidas reais e frescas.":"Nenhuma partida antiga é tratada como ao vivo.")
   );
 }
 function providerKind(s){const x=`${s.provider_family} ${s.provider_name}`.toLowerCase();return x.includes("betzord")?"betzord":x.includes("máfia")||x.includes("mafia")?"mafia":"other"}
@@ -354,7 +372,15 @@ async function ensurePushSubscription(sendTest=false){
   localStorage.setItem("matchintel-push-enabled","1");
   setAlertsStatus("Alertas ativos neste aparelho. Push crítico + som do Android.",true);
   await playAlertTone();
-  if(sendTest) await sendPushTest(sub);
+  if(sendTest){
+    try{
+      await sendPushTest(sub);
+      setAlertsStatus("Alertas ativos neste aparelho. Teste remoto enviado com sucesso.",true);
+    }catch(e){
+      console.error(e);
+      setAlertsStatus("Alertas ativos. O teste remoto falhou; sua inscrição continua ativa.",true);
+    }
+  }
   return true;
 }
 async function initPushUI(){
@@ -367,7 +393,7 @@ async function initPushUI(){
       await ensurePushSubscription(true);
     }catch(e){
       console.error(e);
-      setAlertsStatus("Não consegui concluir o teste de push. Toque para tentar novamente.");
+      setAlertsStatus("Não consegui criar/registrar a inscrição de alertas. Toque para tentar novamente.",false);
     }finally{btn.disabled=false}
   };
   if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){

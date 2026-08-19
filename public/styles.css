@@ -54,3 +54,10 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
   .install.alerts{margin-left:0;margin-top:8px}
   .alert-status{margin-bottom:3px}
 }
+
+
+/* P2 Autonomous Radar */
+#homePrelive .match .minute{min-width:58px;font-size:11px}
+#homePrelive .match{background:linear-gradient(90deg,rgba(202,174,99,.045),transparent)}
+.filters button[data-filter="prelive"]{border-color:rgba(202,174,99,.25)}
+.filters button[data-filter="prelive"].active{color:#e6ca82;border-color:rgba(202,174,99,.55);background:rgba(202,174,99,.08)}
