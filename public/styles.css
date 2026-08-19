@@ -155,3 +155,12 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 .tp-audit.no{color:inherit!important;background:rgba(255,255,255,.025)!important;border-color:rgba(255,255,255,.12)!important}
 .perf-result.historical{color:inherit!important;background:rgba(255,255,255,.035)!important;border-color:rgba(255,255,255,.11)!important;opacity:.72}
 @media(max-width:680px){.lifecycle-grid{grid-template-columns:1fr 1fr}.lab-shell.lab-compact{max-height:220px}}
+
+
+/* P7 HISTORICAL EXPANSION */
+.hx-card{border:1px solid rgba(116,183,255,.16);border-radius:16px;padding:12px 13px;background:linear-gradient(180deg,rgba(116,183,255,.045),rgba(255,255,255,.015));margin-bottom:13px}.hx-card.paused{border-color:rgba(255,190,92,.20)}.hx-card.complete{border-color:rgba(117,231,184,.22)}
+.hx-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.hx-head>div{display:flex;flex-direction:column;gap:2px}.hx-head small{font-size:8px;letter-spacing:.10em;opacity:.6}.hx-head strong{font-size:13px}.hx-head span{font-size:9px;opacity:.62}.hx-head>b{font-size:25px;line-height:1}.hx-head>b small{font-size:10px;margin-left:2px}
+.hx-progress{height:7px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden;margin:11px 0 8px}.hx-progress i{display:block;height:100%;background:currentColor;opacity:.72}
+.hx-milestones{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:7px 0 10px}.hx-mark{border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:6px;display:flex;flex-direction:column;opacity:.48}.hx-mark.on{opacity:1;border-color:rgba(117,231,184,.2)}.hx-mark b{font-size:11px}.hx-mark small{font-size:8px}
+.hx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.hx-kpis span{display:flex;flex-direction:column}.hx-kpis small{font-size:8px;opacity:.58}.hx-kpis b{font-size:10px}.hx-card p{font-size:9px;line-height:1.4;opacity:.65;margin:9px 0 0}.hx-empty{font-size:10px;opacity:.7;padding:10px}
+@media(max-width:620px){.hx-kpis{grid-template-columns:1fr 1fr}.hx-head{flex-direction:column}.hx-milestones{grid-template-columns:1fr 1fr}}

@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="2.0-P6";
+const VERSION="2.1-P7";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -103,7 +103,7 @@ const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/preli
 async function tick(){
   const routes=await Promise.all(discoveryRoutes.map(async route=>[route,await getJson(route)]));
   const routeMap=Object.fromEntries(routes);
-  const [signalsR,statusR,eventsR,p3R,ticketsR,valueR,performanceR,backtestR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets"),getJson("/value-board"),getJson("/performance"),getJson("/backtest")]);
+  const [signalsR,statusR,eventsR,p3R,ticketsR,valueR,performanceR,backtestR,historyR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets"),getJson("/value-board"),getJson("/performance"),getJson("/backtest"),getJson("/history-status")]);
   const radar=routeMap["/radar"];
   if(!radar&&!statusR&&!routes.some(([,v])=>v)){console.log(new Date().toLocaleTimeString(),"Gateway indisponivel; aguardando...");return}
 
@@ -163,14 +163,15 @@ async function tick(){
   const readyTickets=tickets.filter(x=>x.status==="READY"||x.status==="LOCKED").length;
   const perfLabel=perfSnapshot?` perf=${perfSnapshot.settled_count||0}S/${perfSnapshot.observed_bets||0}O yield=${perfSnapshot.yield_pct==null?"—":Number(perfSnapshot.yield_pct).toFixed(1)+"%"}`:"";
   const btLabel=backtestR?` replay=${backtestR.source_quality?.audit_eligible||0}A/${backtestR.walk_forward?.prediction_count||0}W cand=${backtestR.candidate_count||0} promote=${backtestR.promotion_count||0}`:"";
-  console.log(new Date().toLocaleTimeString(),`P6 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  const histLabel=historyR?` hist=${historyR.history?.fixtures||0}/${historyR.targetFixtures||600} days=${historyR.history?.backfilledDays||0}/${historyR.targetDays||35} hphase=${historyR.phase||"?"}`:"";
+  console.log(new Date().toLocaleTimeString(),`P7 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
   if(activeRoutes)console.log("  radar sources ->",activeRoutes);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST | intervalo ${every/1000}s`);
-console.log("P6 publica replay/backtest em canal cloud separado; walk-forward usa somente dados anteriores ao kickoff e nunca promove regra automaticamente.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY | intervalo ${every/1000}s`);
+console.log("P7 acompanha expansao historica sem chamadas extras no Bridge; Gateway preserva floor diario/minuto e P6 segue sem promocao automatica.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);
