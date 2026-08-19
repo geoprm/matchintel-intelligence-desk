@@ -175,6 +175,26 @@ function matchCard(m){
   </div>`;
 }
 /* P4A3_MATCHCARD_END */
+/* P8_2_HISTORICAL_LIST_SEMANTICS */
+function historicalPhaseLabel(m){
+  const p=String(m?.phase||'FT').toUpperCase();
+  if(/PEN/.test(p))return 'PEN';
+  if(/AET|ET/.test(p))return 'AET';
+  return 'FT';
+}
+function historicalMatchCard(m){
+  const score=(m.home_score!=null&&m.away_score!=null)?String(m.home_score)+"–"+String(m.away_score):"—";
+  const lc=lifecycleState(m);
+  const semantic=lc==='HISTORICO'?'HISTÓRICO':'FINALIZADO';
+  const comp=[m.competition,semantic].filter(Boolean).join(' · ');
+  return '<div class="match history-match" data-match="'+esc(m.match_key)+'">'+
+    '<div class="minute history-minute">'+esc(historicalPhaseLabel(m))+'</div>'+
+    '<div class="teams"><strong>'+esc(m.home)+' × '+esc(m.away)+'</strong><small>'+esc(comp)+'</small></div>'+
+    '<div class="score history-score">'+score+'</div>'+
+    '<div class="market history-market"><span>Histórico</span><b>—</b></div>'+
+  '</div>';
+}
+
 function renderHome(){
   const activeSignals=state.signals.filter(s=>isFreshSignal(s));
   const priorities=activeSignals.filter(isFreshPriority).slice(0,4);
@@ -295,8 +315,8 @@ function renderSignals(){
   $("#sourceList").innerHTML=sources.map(x=>`<div class="source"><span class="dot" style="${x.on?"":"background:#566663"}"></span><div class="main"><strong>${x.name}</strong><small>${esc(x.sub)}</small></div><span class="pill ${x.on?"ok":x.status==="Aguardando Gateway"?"warn":""}">${esc(x.status)}</span></div>`).join("");
 }
 function renderHistory(){
-  const rows=state.matches.filter(isFinishedMatch).sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)).slice(0,60);
-  $("#historyList").innerHTML=rows.length?rows.map(matchCard).join(""):empty("Histórico vazio","Somente partidas encerradas e realmente acompanhadas aparecem aqui.");
+  const rows=state.matches.filter(lifecycleFinished).sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at)).slice(0,60);
+  $("#historyList").innerHTML=rows.length?rows.map(historicalMatchCard).join(""):empty("Histórico vazio","Somente partidas encerradas e realmente acompanhadas aparecem aqui.");
 }
 function render(){
   renderStatus();renderHome();renderLive();renderSignals();renderHistory();bindMatchClicks();
