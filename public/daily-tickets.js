@@ -33,7 +33,12 @@ function card(t){
   const minBase=80;
   const basePct=Math.max(0,Math.min(100,base/minBase*100));
   const status=ready?t.status:(base>=minBase?'ANALISANDO PERFIL':'AQUECENDO MODELO');
-  const legs=ready?sels.map(s=>`<li><div><strong>${esc(s.home)} × ${esc(s.away)}</strong><small>${esc(s.market_label||s.market)} · ${time(s.kickoff)}</small></div><div class="ticket-leg-prob">${pct(s.probability)}</div></li>`).join(''):'';
+  /* P4BC_TICKET_ODDS_UI */
+  const legs=ready?sels.map(s=>{
+    const obs=Number(s.observed_odds)>1?Number(s.observed_odds):null,edge=Number.isFinite(Number(s.value_edge_pp))?Number(s.value_edge_pp):null;
+    const marketLine=obs?` · odd obs. ${odd(obs)}${edge!=null?` · edge ${edge>=0?"+":""}${edge.toFixed(1)} p.p.`:""}`:"";
+    return `<li><div><strong>${esc(s.home)} × ${esc(s.away)}</strong><small>${esc(s.market_label||s.market)} · ${time(s.kickoff)}${marketLine}</small></div><div class="ticket-leg-prob">${pct(s.probability)}</div></li>`;
+  }).join(''):'';
   const waitingText=base<minBase
     ?`Base histórica ${base}/${minBase}. O motor libera este perfil automaticamente quando houver amostra e qualidade suficientes.`
     :'Base mínima atingida. O motor está procurando combinações que também respeitem probabilidade, qualidade e faixa de odd deste perfil.';

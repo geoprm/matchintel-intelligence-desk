@@ -267,10 +267,12 @@ function renderSignals(){
   const s=state.status;
   const fresh=gatewayFresh();
   const apiConfigured=!!(s?.api_provider?.toLowerCase().includes("football")||s?.auto_scan_active);
+  const oddsConfigured=/the odds api/i.test(String(s?.api_provider||""));
   const tgConfigured=!!s?.telegram_connected;
   const matrixCount=Number(s?.independent_sources||0);
   const sources=[
     {name:"API-Football",on:fresh&&apiConfigured,status:fresh&&apiConfigured?"Ativa":apiConfigured?"Aguardando Gateway":"Manual",sub:fresh?"fixtures, placar e estatísticas via Gateway":"Gateway offline; dados automáticos pausados"},
+    {name:"The Odds API",on:fresh&&oddsConfigured,status:fresh&&oddsConfigured?"Ativa":oddsConfigured?"Aguardando Gateway":"Aguardando chave",sub:oddsConfigured?"segunda família esportiva + consenso de odds; não conta Telegram":"feed externo opcional para P4B/P4C"},
     {name:"Telegram",on:fresh&&tgConfigured,status:fresh&&tgConfigured?"Conectado":tgConfigured?"Aguardando Gateway":"Manual",sub:fresh&&tgConfigured?"Chat Máfia / BetZord via conta local":"A conexão Telegram depende do Gateway local ligado"},
     {name:"Source Matrix",on:fresh&&matrixCount>0,status:fresh?(matrixCount>0?"Ativa":"Sem consenso"):"Aguardando Gateway",sub:`${matrixCount} fonte(s) independente(s) no status global`},
     {name:"Bet365",on:false,status:"Manual",sub:"link original do Chat Máfia / view manual"},
@@ -287,6 +289,24 @@ function render(){
 }
 function bindMatchClicks(){
   $$("[data-match]").forEach(el=>el.onclick=()=>openMatch(el.dataset.match));
+}
+/* P4BC_MARKET_UI */
+function marketIntelBlock(m){
+  const mi=m?.stats?._matchintel?.marketIntel||null;if(!mi)return "";
+  const over=mi?.totals25?.outcomes?.OVER||null,home=mi?.h2h?.outcomes?.HOME||null,draw=mi?.h2h?.outcomes?.DRAW||null,away=mi?.h2h?.outcomes?.AWAY||null;
+  const f=v=>v==null||!Number.isFinite(Number(v))?"—":Number(v).toFixed(2);
+  const p=v=>v==null||!Number.isFinite(Number(v))?"—":Number(v).toFixed(1)+"%";
+  const when=mi.fetchedAt?fmtTime(mi.fetchedAt):"—";
+  return `<div class="section-title"><h2>Mercado observado</h2><span>The Odds API · ${esc(when)}</span></div>
+    <div class="card market-value-card">
+      <div class="market-value-grid">
+        <div><small>Over 2.5 · melhor odd</small><b>${f(over?.bestOdds)}</b><span>consenso justo ${p(over?.fairProbability)}</span></div>
+        <div><small>Casa · 1X2</small><b>${f(home?.bestOdds)}</b><span>justo ${p(home?.fairProbability)}</span></div>
+        <div><small>Empate · 1X2</small><b>${f(draw?.bestOdds)}</b><span>justo ${p(draw?.fairProbability)}</span></div>
+        <div><small>Fora · 1X2</small><b>${f(away?.bestOdds)}</b><span>justo ${p(away?.fairProbability)}</span></div>
+      </div>
+      <p class="note">Odds observadas são separadas da probabilidade MatchIntel e podem vir de bookmakers internacionais suportados pelo feed; não significam Betano/Bet365 Brasil.</p>
+    </div>`;
 }
 function openMatch(key){
   const m=state.matches.find(x=>x.match_key===key); if(!m)return;
@@ -316,6 +336,7 @@ function openMatch(key){
     <div class="card"><div style="display:flex;justify-content:space-between"><strong>${qualityLabel(m)}</strong><span class="note">${m.independent_sources||0} fonte(s) · ${m.conflicts||0} conflito(s)</span></div><div class="progress" style="margin-top:9px"><i style="width:${qualityWidth(m)}%"></i></div><p class="note">${esc(m.source_matrix_state||"Source Matrix sem estado informado.")}</p></div>
     <div class="section-title"><h2>Estatísticas presentes</h2><span>somente campos recebidos</span></div>
     <div class="stats">${statPairs.map(([a,b])=>`<div class="stat"><b>${esc(b)}</b><small>${a}</small></div>`).join("")}</div>
+    ${marketIntelBlock(m)}
     <div class="section-title"><h2>Por quê / Riscos</h2><span>guardrails</span></div>
     <div class="card"><p class="note">${esc(m.best_explanation||"Sem justificativa adicional.")}</p>${risks.length?`<ul class="note warning">${risks.map(r=>`<li>${esc(typeof r==="string"?r:JSON.stringify(r))}</li>`).join("")}</ul>`:`<p class="note">Nenhum risco estruturado foi enviado.</p>`}</div>
     <div class="section-title"><h2>Timeline</h2><span>${ev.length} eventos</span></div>
