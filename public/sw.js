@@ -1,5 +1,5 @@
-const CACHE="matchintel-shell-p4bc-v1";
-const ASSETS=["/","/index.html","/styles.css","/app.js","/daily-tickets.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
+const CACHE="matchintel-shell-p4c2-v1";
+const ASSETS=["/","/index.html","/styles.css","/app.js","/daily-tickets.js","/value-board.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 
 self.addEventListener("install",e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));

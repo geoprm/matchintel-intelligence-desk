@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="1.7-P4BC";
+const VERSION="1.8-P4C2";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +22,7 @@ const gatewayToken=env.GATEWAY_ACCESS_TOKEN;
 const ingestUrl=env.MATCHINTEL_INGEST_URL;
 const ingestKey=env.MATCHINTEL_INGEST_KEY;
 const ticketIngestUrl=env.MATCHINTEL_TICKET_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-ticket-ingest");
+const valueIngestUrl=env.MATCHINTEL_VALUE_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-value-ingest");
 const every=Math.max(10000,Number(env.MATCHINTEL_SYNC_MS||20000));
 if(!gatewayToken||!ingestUrl||!ingestKey){console.error("[ERRO] Configuracao incompleta.");process.exit(1)}
 
@@ -100,7 +101,7 @@ const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/preli
 async function tick(){
   const routes=await Promise.all(discoveryRoutes.map(async route=>[route,await getJson(route)]));
   const routeMap=Object.fromEntries(routes);
-  const [signalsR,statusR,eventsR,p3R,ticketsR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets")]);
+  const [signalsR,statusR,eventsR,p3R,ticketsR,valueR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets"),getJson("/value-board")]);
   const radar=routeMap["/radar"];
   if(!radar&&!statusR&&!routes.some(([,v])=>v)){console.log(new Date().toLocaleTimeString(),"Gateway indisponivel; aguardando...");return}
 
@@ -133,15 +134,23 @@ async function tick(){
       const tt=await tr.text();if(!tr.ok)throw new Error(`TicketCloud ${tr.status}: ${tt}`);try{ticketCloud=JSON.parse(tt)}catch{}
     }catch(e){console.error("tickets cloud:",e.message)}
   }
+  const opportunities=Array.isArray(valueR?.opportunities)?valueR.opportunities:[];
+  if(opportunities.length){
+    try{
+      const vr=await fetch(valueIngestUrl,{method:"POST",headers:{"content-type":"application/json","x-matchintel-key":ingestKey},body:JSON.stringify({opportunities}),signal:AbortSignal.timeout(12000)});
+      const vt=await vr.text();if(!vr.ok)throw new Error(`ValueCloud ${vr.status}: ${vt}`);
+    }catch(e){console.error("value cloud:",e.message)}
+  }
   const resolvedSignals=signalsRaw.filter(s=>String(s.resolutionStatus||"").toUpperCase()==="RESOLVED").length;
-  console.log(new Date().toLocaleTimeString(),`P4BC sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${tickets.filter(x=>x.status==="READY").length}/4${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  const valueStrong=opportunities.filter(x=>x.status==="STRONG_VALUE").length,valueReady=opportunities.filter(x=>x.status==="VALUE").length;
+  console.log(new Date().toLocaleTimeString(),`P4C2 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${tickets.filter(x=>x.status==="READY").length}/4 values=${valueReady}+${valueStrong}F${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
   if(activeRoutes)console.log("  radar sources ->",activeRoutes);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM E2E + P4A TICKETS + P4B/C SOURCE/VALUE | intervalo ${every/1000}s`);
-console.log("P4B/C preserva odds observadas apenas quando vierem de feed externo; odd justa do modelo continua separada de bookmaker.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4B/C SOURCE + P4C2 VALUE BOARD | intervalo ${every/1000}s`);
+console.log("P4C2 publica Value Board em canal cloud separado; odds observadas continuam separadas da probabilidade do modelo.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);
