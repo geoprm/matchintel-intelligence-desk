@@ -62,6 +62,14 @@ function statValue(m,v){
 }
 function qualityLabel(m){return m?.data_quality==null?"—":`${Number(m.data_quality)}%`}
 function qualityWidth(m){return m?.data_quality==null?0:Math.max(0,Math.min(100,Number(m.data_quality)||0))}
+/* P8_1_MATCH_SEMANTIC_SAFETY */
+function lifecycleState(m){return String(m?.lifecycle_state||'').toUpperCase()}
+function lifecycleFinished(m){return ['FINALIZADO','HISTORICO'].includes(lifecycleState(m))||isFinishedMatch(m)}
+function lifecycleExpired(m){return lifecycleState(m)==='EXPIRADO'}
+function semanticStatusLabel(m){if(lifecycleFinished(m))return `FINALIZADO · ${String(m?.phase||'FT').toUpperCase()}`;if(lifecycleExpired(m))return 'EXPIRADO';if(isPrelive(m))return preliveOperationalLabel(m);return m?.radar_state||m?.state||'ATIVO'}
+function qualifiedProbability(m){const p=Number(m?.best_probability),dq=Number(m?.data_quality||0),src=Number(m?.independent_sources||0),conf=Number(m?.conflicts||0);if(lifecycleFinished(m)||lifecycleExpired(m))return null;if(!Number.isFinite(p)||dq<50||src<1||conf>0||!m?.best_market)return null;return Math.max(0,Math.min(100,p))}
+function rawProbabilityNote(m){const p=Number(m?.best_probability);if(!Number.isFinite(p))return '';const market=m?.best_market?` · ${esc(m.best_market)}`:'';const reason=lifecycleFinished(m)?'histórica':lifecycleExpired(m)?'expirada':'não qualificada';return `<p class="note raw-estimate">Estimativa bruta ${reason}: <strong>${Math.round(p)}%</strong>${market} · NÃO AUDITÁVEL / NÃO PROMOVIDA</p>`}
+function qualifiedBestLevel(m){return qualifiedProbability(m)==null?'Não qualificada':(m?.best_level||'Neutro')}
 
 
 const P0_VERSION="p0-freshness-v1.2";
@@ -319,7 +327,8 @@ function openMatch(key){
   const ev=state.events.filter(e=>e.match_key===key).slice(0,60);
   const sig=state.signals.filter(s=>s.match_key===key).slice(0,30);
   const stats=m.stats||{}, risks=Array.isArray(m.risks)?m.risks:[];
-  const prob=m.best_probability!=null?Math.round(Number(m.best_probability)):null;
+  const prob=qualifiedProbability(m);
+  const rawProbNote=rawProbabilityNote(m);
   const statPairs=[
     ["Corners",statValue(m,stats.corners??stats.corner)],["Chutes",statValue(m,stats.shots??stats.total_shots)],
     ["No alvo",statValue(m,stats.shots_on_goal??stats.sot)],["Vermelhos",statValue(m,stats.red_cards??stats.redCards)]
@@ -328,14 +337,14 @@ function openMatch(key){
     <div class="card priority">
       <div class="teams"><strong style="font-size:17px">${esc(m.home)} × ${esc(m.away)}</strong><small>${esc(m.competition||"")}</small></div>
       <div style="display:flex;justify-content:space-between;align-items:end;margin-top:12px">
-        <div><span class="pill ok">${esc(isPrelive(m)?scheduledLabel(m):minuteLabel(m.minute,m.phase))}</span> <span class="pill">${esc(isPrelive(m)?preliveOperationalLabel(m):(m.radar_state||m.state||""))}</span></div>
+        <div><span class="pill ok">${esc(isPrelive(m)&&!lifecycleFinished(m)?scheduledLabel(m):minuteLabel(m.minute,m.phase))}</span> <span class="pill">${esc(semanticStatusLabel(m))}</span></div>
         <div class="score">${isPrelive(m)?"—":`${m.home_score??"—"} – ${m.away_score??"—"}`}</div>
       </div>
     </div>
     <div class="section-title"><h2>Melhor leitura</h2><span>Probabilidade ≠ oportunidade</span></div>
     <div class="card">
-      <div style="display:flex;justify-content:space-between;gap:12px"><div><strong>${esc(m.best_market||"Sem mercado elegível")}</strong><p class="note">${esc(m.best_explanation||"Sem explicação recebida do motor.")}</p></div><div style="font-size:27px;font-weight:800">${prob==null?"—":prob+"%"}</div></div>
-      <span class="pill ${/elite|forte/i.test(m.best_level||"")?"ok":"warn"}">${esc(m.best_level||"Neutro")}</span>
+      <div style="display:flex;justify-content:space-between;gap:12px"><div><strong>${esc(prob==null?(lifecycleFinished(m)?"Leitura histórica não auditável":"Sem leitura qualificada"):(m.best_market||"Sem mercado elegível"))}</strong><p class="note">${esc(prob==null?"A estimativa bruta foi preservada, mas não atende aos guardrails para promoção.":(m.best_explanation||"Sem explicação recebida do motor."))}</p>${rawProbNote}</div><div class="${prob==null?"prob-unqualified":""}" style="font-size:27px;font-weight:800">${prob==null?"—":Math.round(prob)+"%"}</div></div>
+      <span class="pill ${prob!=null&&/elite|forte/i.test(m.best_level||"")?"ok":"warn"}">${esc(qualifiedBestLevel(m))}</span>
       ${state.status?.shadow_mode?`<span class="badge shadow">Shadow / em calibração</span>`:""}
     </div>
     <div class="section-title"><h2>Qualidade dos dados</h2><span>não é chance de acerto</span></div>
@@ -396,7 +405,7 @@ function setAlertsStatus(text,active=false){
   if(el){el.textContent=text;el.classList.toggle("active",!!active)}
   const btn=$("#alertsBtn");
   if(btn){
-    btn.textContent=active?"🔔 Alertas críticos ativos":"🔔 Ativar alertas críticos";
+    btn.textContent=active?"🔔 Notificações críticas ativadas":"🔔 Ativar notificações críticas";
     btn.classList.toggle("active",!!active);
   }
 }

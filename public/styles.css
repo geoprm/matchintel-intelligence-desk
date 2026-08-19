@@ -172,3 +172,9 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 .dc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.dc-card{border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 11px;background:rgba(255,255,255,.022)}.dc-card.best{border-color:rgba(217,182,93,.21)}.dc-card.value{border-color:rgba(255,190,92,.20)}.dc-card.ticket{border-color:rgba(116,183,255,.17)}.dc-card.bingo{border-color:rgba(190,153,255,.17)}.dc-card.avoid{border-color:rgba(255,130,130,.13)}
 .dc-title{display:flex;gap:6px;align-items:center;margin-bottom:8px}.dc-title span{font-size:12px}.dc-title strong{font-size:10px;text-transform:uppercase;letter-spacing:.04em}.dc-main{display:flex;flex-direction:column;gap:2px}.dc-main strong{font-size:12px}.dc-main small{font-size:9px;opacity:.62}.dc-kpis{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}.dc-kpis span{display:flex;flex-direction:column}.dc-kpis small{font-size:8px;opacity:.55}.dc-kpis b{font-size:10px}.dc-empty{font-size:10px;line-height:1.4;opacity:.66;padding:4px 0}.dc-avoid-list{display:flex;flex-direction:column;gap:7px}.dc-avoid-list>div{display:flex;flex-direction:column;gap:1px}.dc-avoid-list strong{font-size:10px}.dc-avoid-list small{font-size:8px;opacity:.58}.dc-note{font-size:8px;opacity:.56;line-height:1.4;margin:9px 1px 13px}
 @media(max-width:650px){.dc-grid{grid-template-columns:1fr}.dc-readiness{grid-template-columns:1fr 1fr}.dc-hero{flex-direction:column}.dc-shadow{align-self:flex-start}}
+
+
+/* P8.1 DECISION SAFETY GATE */
+.prob-unqualified{opacity:.42;font-weight:700!important}
+.raw-estimate{margin-top:8px;padding:7px 8px;border:1px solid rgba(255,190,92,.14);border-radius:10px;background:rgba(255,190,92,.035);font-size:9px!important;line-height:1.45}
+.raw-estimate strong{font-size:10px}
