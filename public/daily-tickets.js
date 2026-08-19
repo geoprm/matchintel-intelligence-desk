@@ -32,7 +32,10 @@ function card(t){
   const base=Number(t?.metadata?.history?.fixtures??t?.metadata?.historyFixtures??0);
   const minBase=80;
   const basePct=Math.max(0,Math.min(100,base/minBase*100));
-  const status=ready?t.status:(base>=minBase?'ANALISANDO PERFIL':'AQUECENDO MODELO');
+  /* P5_TICKET_SETTLEMENT_UI */
+  const settled=t.status==='SETTLED';
+  const resultLabel=settled?(t.result==='WON'?'GREEN':t.result==='LOST'?'RED':(t.result||'SETTLED')):null;
+  const status=settled?resultLabel:(ready?t.status:(base>=minBase?'ANALISANDO PERFIL':'AQUECENDO MODELO'));
   /* P4BC_TICKET_ODDS_UI */
   const legs=ready?sels.map(s=>{
     const obs=Number(s.observed_odds)>1?Number(s.observed_odds):null,edge=Number.isFinite(Number(s.value_edge_pp))?Number(s.value_edge_pp):null;
@@ -45,7 +48,8 @@ function card(t){
   const info=ready
     ?`<div class="ticket-kpis"><div><small>${oddsLabel}</small><b>${odd(oddsValue)}</b></div><div><small>Prob. combinada</small><b>${pct(t.combined_probability)}</b></div><div><small>Odd mín. valor</small><b>${odd(t.min_value_odds)}</b></div></div><ol class="ticket-legs">${legs}</ol>`
     :`<div class="ticket-warmup"><p class="ticket-wait">${esc(waitingText)}</p><div class="ticket-progress"><i style="width:${basePct}%"></i></div><small>${base}/${minBase} fixtures mínimos · SHADOW</small></div>`;
+  const resultBanner=settled?`<div class="ticket-result ${t.result==='WON'?'won':'lost'}">${t.result==='WON'?'Bilhete bateu':'Bilhete não bateu'}${t.hits!=null&&t.legs!=null?` · ${t.hits}/${t.legs} pernas`:''}</div>`:'';
   const footMiddle=ready?`amostra ${Number(t.sample_size||0)}`:`base ${base}/${minBase}`;
-  return `<article class="daily-ticket ${m.tone} ${ready?'ready':'insufficient'}"><div class="ticket-head"><div><span class="ticket-icon">${m.icon}</span><div><strong>${esc(m.name)}</strong><small>${esc(t.model_version||'P4A')}</small></div></div><span class="ticket-status">${esc(status)}</span></div>${info}<div class="ticket-foot"><span>DQ ${ready?Number(t.data_quality||0)+'%':'—'}</span><span>${footMiddle}</span><span class="shadow-chip">SHADOW</span></div>${t.ticket_type==='BINGO'&&ready?'<div class="ticket-risk">Alta variância: probabilidade absoluta menor, apesar da seleção orientada por dados.</div>':''}</article>`;
+  return `<article class="daily-ticket ${m.tone} ${ready?'ready':'insufficient'}"><div class="ticket-head"><div><span class="ticket-icon">${m.icon}</span><div><strong>${esc(m.name)}</strong><small>${esc(t.model_version||'P4A')}</small></div></div><span class="ticket-status">${esc(status)}</span></div>${info}${resultBanner}<div class="ticket-foot"><span>DQ ${ready?Number(t.data_quality||0)+'%':'—'}</span><span>${footMiddle}</span><span class="shadow-chip">SHADOW</span></div>${t.ticket_type==='BINGO'&&ready?'<div class="ticket-risk">Alta variância: probabilidade absoluta menor, apesar da seleção orientada por dados.</div>':''}</article>`;
 }
 window.addEventListener('DOMContentLoaded',()=>{loadTickets();setInterval(loadTickets,30000)});
