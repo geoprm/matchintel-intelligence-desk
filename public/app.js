@@ -520,7 +520,7 @@ async function initPushUI(){
       const sub=await reg.pushManager.getSubscription();
       if(sub){
         await postPushSubscription(sub);
-        setAlertsStatus("Alertas ativos neste aparelho.",true);
+        setAlertsStatus("Notificações críticas habilitadas · alertas operacionais dependem de dados esportivos FRESH.",true);
       }
     }catch{}
   }

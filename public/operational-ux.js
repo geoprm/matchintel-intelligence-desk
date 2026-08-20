@@ -1,3 +1,4 @@
+/* P11_0_2_DISTINCT_ANALYSIS_LABELS */
 const oxCfg=()=>window.MATCHINTEL_CONFIG||null;
 const oxEsc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const oxHeaders=c=>({apikey:c.SUPABASE_KEY,Authorization:`Bearer ${c.SUPABASE_KEY}`});
@@ -24,17 +25,17 @@ async function oxLoadLifecycle(){
   try{oxRenderLifecycle(await oxQ(c,'matchintel_match_lifecycle_summary'))}
   catch(e){const el=document.querySelector('#lifecycleSummary');if(el)el.innerHTML=`<div class="life-empty">Lifecycle indisponível · ${oxEsc(e.message)}</div>`}
 }
-function oxSetupLab(targetId,buttonId){
+function oxSetupLab(targetId,buttonId,openLabel='análise completa',closeLabel='análise'){
   const el=document.getElementById(targetId),btn=document.getElementById(buttonId);if(!el||!btn)return;
   const key=`matchintel:${targetId}:expanded`;
   let expanded=sessionStorage.getItem(key)==='1';
-  const apply=()=>{el.classList.toggle('lab-compact',!expanded);btn.textContent=expanded?'Recolher análise':'Ver análise completa';btn.setAttribute('aria-expanded',String(expanded))};
+  const apply=()=>{el.classList.toggle('lab-compact',!expanded);btn.textContent=expanded?`Recolher ${closeLabel}`:`Ver ${openLabel}`;btn.setAttribute('aria-expanded',String(expanded))};
   btn.addEventListener('click',()=>{expanded=!expanded;sessionStorage.setItem(key,expanded?'1':'0');apply()});
   apply();
 }
 window.addEventListener('DOMContentLoaded',()=>{
-  oxSetupLab('performanceLab','performanceToggle');
-  oxSetupLab('backtestLab','backtestToggle');
+  oxSetupLab('performanceLab','performanceToggle','Performance completa','Performance');
+  oxSetupLab('backtestLab','backtestToggle','Replay completo','Replay');
   oxLoadLifecycle();
   setInterval(oxLoadLifecycle,30000);
 });

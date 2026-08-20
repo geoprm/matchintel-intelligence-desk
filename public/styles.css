@@ -262,3 +262,10 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 /* Home now prioritizes action. Analytics moved to the Hub. */
 #home .section-title h2{letter-spacing:.01em}
 @media(max-width:760px){.hd-main,.hub-top{flex-direction:column}.hd-main button,.hub-top button{align-self:flex-start}.hd-strip,.hub-summary-grid{grid-template-columns:1fr 1fr}.hub-jump{margin-right:-6px}.home-command-deck{padding:9px}.hd-strip b{font-size:7px}}
+
+
+/* P11.0.2 LIVE TRUTH + FRESHNESS INTEGRITY */
+.lo-fresh.degraded,.lo-status.degraded{color:#f1c86b;border-color:rgba(241,200,107,.35);background:rgba(241,200,107,.07)}
+.lo-match.degraded{border-color:rgba(241,200,107,.20)}
+.lo-fresh.stale,.lo-fresh.unknown{color:#ff8d83;border-color:rgba(255,141,131,.34);background:rgba(255,141,131,.07)}
+.lo-summary{grid-template-columns:repeat(auto-fit,minmax(92px,1fr))}

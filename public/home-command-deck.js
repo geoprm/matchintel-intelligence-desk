@@ -1,3 +1,4 @@
+/* P11_0_2_NOTIFICATION_COPY */
 const hdq=(s,r=document)=>r.querySelector(s);
 const hdqa=(s,r=document)=>[...r.querySelectorAll(s)];
 const hdEsc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -109,9 +110,9 @@ function hdBuild(){
   // Clean old notification wording without changing push behavior.
   const alerts=hdq('#alertsStatus');
   if(alerts&&/alertas ativos neste aparelho|notifica/i.test(alerts.textContent||'')){
-    const obs=new MutationObserver(()=>{if(/alertas ativos neste aparelho/i.test(alerts.textContent||''))alerts.textContent='Push backend ativo enquanto Gateway/Bridge sincronizam.'});
+    const obs=new MutationObserver(()=>{if(/alertas ativos neste aparelho/i.test(alerts.textContent||''))alerts.textContent='Notificações críticas habilitadas · decisões automáticas exigem dados esportivos FRESH.'});
     obs.observe(alerts,{childList:true,subtree:true,characterData:true});
-    if(/alertas ativos neste aparelho/i.test(alerts.textContent||''))alerts.textContent='Push backend ativo enquanto Gateway/Bridge sincronizam.';
+    if(/alertas ativos neste aparelho/i.test(alerts.textContent||''))alerts.textContent='Notificações críticas habilitadas · decisões automáticas exigem dados esportivos FRESH.';
   }
 
   hdRefresh();
