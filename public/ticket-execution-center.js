@@ -1,0 +1,31 @@
+const C=()=>window.MATCHINTEL_CONFIG||null,$=s=>document.querySelector(s),E=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const TYPES=['SAFETY','BALANCED','VALUE','BINGO'],META={SAFETY:['🛡️','Segurança'],BALANCED:['⚖️','Equilíbrio'],VALUE:['🔥','Valor'],BINGO:['🎯','Bingo']};
+const day=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Bahia',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()),o=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${o.year}-${o.month}-${o.day}`};
+const H=c=>({apikey:c.SUPABASE_KEY,Authorization:`Bearer ${c.SUPABASE_KEY}`}),pct=v=>Number.isFinite(Number(v))?`${Number(v).toFixed(1)}%`:'—',odd=v=>Number(v)>1?Number(v).toFixed(2):'—';
+function dev(){let x=localStorage.getItem('matchintel-p10-device');if(!x){x=(crypto.randomUUID?.()||`${Date.now()}_${Math.random()}`).replace(/[^a-zA-Z0-9_-]/g,'_');localStorage.setItem('matchintel-p10-device',x)}return x}
+async function q(c,t,p){const r=await fetch(`${c.SUPABASE_URL}/rest/v1/${t}?${p}`,{headers:H(c),cache:'no-store'});if(!r.ok)throw new Error(`${t}: HTTP ${r.status}`);return r.json()}
+async function api(c,method='GET',body){const h={...H(c),'x-matchintel-device':dev()};if(body)h['content-type']='application/json';const r=await fetch(`${c.SUPABASE_URL}/functions/v1/matchintel-ticket-execution`,{method,headers:h,body:body?JSON.stringify(body):undefined,cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);return j}
+function fmt(v){try{return new Date(v).toLocaleString('pt-BR',{timeZone:'America/Bahia',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch{return '—'}}
+function leg(s){return `<li><div><b>${E(s.home)} × ${E(s.away)}</b><small>${E(s.market_label||s.market||'mercado')}</small></div><span>${pct(s.probability)}</span></li>`}
+function card(t,e,base){
+ const [ic,nm]=META[t.ticket_type]||['◈',t.ticket_type],ready=['READY','LOCKED'].includes(String(t.status).toUpperCase()),sels=Array.isArray(t.selections)?t.selections:[];
+ const state=e?'EXECUTADO':ready?`${t.status} · REVISAR`:'AQUECENDO',p=Math.min(100,base/80*100),obs=Number(t.observed_odds)>1?Number(t.observed_odds).toFixed(2):'';
+ const body=ready||e?`<div class="p10-k"><span>Prob.<b>${pct(t.combined_probability)}</b></span><span>Odd justa<b>${odd(t.fair_odds)}</b></span><span>Odd feed<b>${odd(t.observed_odds)}</b></span><span>DQ<b>${t.data_quality??'—'}${t.data_quality!=null?'%':''}</b></span></div>${sels.length?`<ol>${sels.map(leg).join('')}</ol>`:''}`:`<div class="p10-w"><p>Base histórica abaixo do primeiro marco ou perfil ainda não publicado como READY.</p><i><b style="width:${p}%"></b></i><small>${base}/80 fixtures · alvo P7 600</small></div>`;
+ const action=e?`<div class="p10-done"><b>Execução registrada</b><span>Odd ${odd(e.executed_odds)} · ${Number(e.stake_units).toFixed(2)} u · ${fmt(e.created_at)}</span></div>`:ready?`<div class="p10-form"><input data-odd="${E(t.ticket_key)}" value="${obs}" placeholder="Odd executada"><input data-unit="${E(t.ticket_key)}" value="1.00" placeholder="Stake u"><input data-amt="${E(t.ticket_key)}" placeholder="R$ opcional"><button data-exec="${E(t.ticket_key)}">Registrar execução</button></div><small class="p10-note">Não envia aposta para bookmaker; apenas registra.</small>`:'';
+ return `<article class="p10-card ${e?'done':ready?'ready':''}"><header><div><span>${ic}</span><b>${E(nm)}</b></div><em>${E(state)}</em></header>${body}${t.calibration_state==='SHADOW'?'<div class="p10-shadow">SHADOW · revise antes de executar.</div>':''}${action}</article>`;
+}
+async function execute(key){
+ const c=C(),root=$('#ticketExecutionCenter'),sel=x=>root.querySelector(x),od=Number((sel(`[data-odd="${CSS.escape(key)}"]`)?.value||'').replace(',','.')),u=Number((sel(`[data-unit="${CSS.escape(key)}"]`)?.value||'').replace(',','.')),aRaw=(sel(`[data-amt="${CSS.escape(key)}"]`)?.value||'').replace(',','.'),a=aRaw===''?null:Number(aRaw);
+ if(!(od>1))return alert('Informe a odd realmente executada (> 1.00).');if(!(u>0))return alert('Informe a stake em unidades.');if(a!=null&&!(a>=0))return alert('Valor R$ inválido.');
+ if(!confirm('Registrar que este bilhete foi realmente executado? O MatchIntel não envia aposta para a casa.'))return;
+ try{await api(c,'POST',{action:'EXECUTE',ticket_key:key,executed_odds:od,stake_units:u,stake_amount:a});load()}catch(e){alert(`Falha no registro: ${e.message}`)}
+}
+async function load(){
+ const c=C(),root=$('#ticketExecutionCenter');if(!root)return;if(!c)return setTimeout(load,800);
+ try{const [ts,hx,ex]=await Promise.all([q(c,'matchintel_daily_tickets',`select=*&ticket_day=eq.${day()}`),q(c,'matchintel_history_progress','select=*&limit=1'),api(c)]),h=hx[0]||{},base=Math.max(Number(h.fixtures||0),...ts.map(t=>Number(t?.metadata?.history?.fixtures||0))),m=Object.fromEntries(ts.map(t=>[t.ticket_type,t])),em=new Map((ex.executions||[]).map(e=>[e.ticket_key,e])),ready=ts.filter(t=>['READY','LOCKED'].includes(t.status)).length;
+ $('#ticketExecutionBadge').textContent=`${ready}/4 READY · ${[...em.values()].filter(e=>e.ticket_day===day()).length} executado(s)`;
+ root.innerHTML=`<div class="p10-hero"><div><small>P10 · TICKET RELEASE & EXECUTION CENTER</small><b>3 bilhetes operacionais + 1 Bingo</b><span>O P10 não cria palpites; recebe os quatro perfis do motor e registra somente o que você realmente executou.</span></div><em>SHADOW / MANUAL</em></div><div class="p10-stats"><span>Primeiro marco<b>${base}/80</b></span><span>P7 histórico<b>${base}/600</b></span><span>Quota<b>${h.quota_daily_remaining??'—'}</b></span><span>Backtest<b>${E(h.backtest_sample_state||'INSUFFICIENT')}</b></span></div><div class="p10-grid">${TYPES.map(k=>card(m[k]||{ticket_type:k,status:'INSUFFICIENT',metadata:{}},em.get(m[k]?.ticket_key),base)).join('')}</div><p class="p10-note">READY/LOCKED abre registro manual. Odd real + stake ficam congeladas no backend. Resultado, lucro, ROI e bankroll entram no P10.1.</p>`;
+ root.querySelectorAll('[data-exec]').forEach(b=>b.onclick=()=>execute(b.dataset.exec));
+ }catch(e){root.innerHTML=`<div class="p10-empty">P10 indisponível · ${E(e.message)}</div>`}
+}
+window.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,30000)});
