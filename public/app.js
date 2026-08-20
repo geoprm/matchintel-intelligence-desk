@@ -583,3 +583,5 @@ loadEvidence();
 loadAll();
 initPushUI();
 setInterval(loadAll,20000);
+
+/* P11_0_5_CANONICAL_CLOUD: lifecycle cloud dedup + provider-ID authority are enforced upstream. */
