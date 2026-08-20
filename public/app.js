@@ -483,15 +483,15 @@ async function ensurePushSubscription(sendTest=false){
   }
   await postPushSubscription(sub);
   localStorage.setItem("matchintel-push-enabled","1");
-  setAlertsStatus("Alertas ativos neste aparelho. Push crítico + som do Android.",true);
+  setAlertsStatus("Notificações habilitadas neste aparelho. Backend P9.4 envia push mesmo com a PWA fechada enquanto Gateway/Bridge sincronizam.",true);
   await playAlertTone();
   if(sendTest){
     try{
       await sendPushTest(sub);
-      setAlertsStatus("Alertas ativos neste aparelho. Teste remoto enviado com sucesso.",true);
+      setAlertsStatus("Notificações habilitadas · teste remoto confirmado.",true);
     }catch(e){
       console.error(e);
-      setAlertsStatus("Alertas ativos. O teste remoto falhou; sua inscrição continua ativa.",true);
+      setAlertsStatus("Notificações habilitadas · teste remoto não confirmado; sua inscrição permanece ativa.",true);
     }
   }
   return true;

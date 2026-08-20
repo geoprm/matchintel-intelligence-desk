@@ -6,6 +6,8 @@ const SA_MATCH_MS=4*60*1000;
 const SA_STORE='matchintel-p93-alert-state-v1';
 const SA_LOG='matchintel-p93-alert-log-v1';
 const SA_MAX_LOG=40;
+/* P9_4_BACKEND_PUSH_OWNER */
+const SA_BACKEND_PUSH_OWNER=true;
 
 function saNorm(s){return String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
 function saTime(v){const t=new Date(v||0).getTime();return Number.isFinite(t)?t:0}
@@ -131,7 +133,7 @@ async function saProcess(matches,signals){
   alerts.push(...saOpportunityAlerts(matches,signals));
   for(const a of alerts){
     saLog(a);
-    await saNotify(a.title,a.body,`matchintel:${a.kind}:${a.match_key||'na'}:${a.level}`);
+    if(!SA_BACKEND_PUSH_OWNER) await saNotify(a.title,a.body,`matchintel:${a.kind}:${a.match_key||'na'}:${a.level}`);
   }
   return alerts;
 }
@@ -151,7 +153,7 @@ async function saLoad(){
     await saProcess(matches,signals);
     const log=saLoadLog(),badge=document.querySelector('#smartAlertBadge');
     if(badge)badge.textContent=`${log.length} recentes · antispam ativo`;
-    root.innerHTML=`<div class="sa-rules"><span><b>🔥 FIXADO</b><small>alerta mesmo com divergência; divergência vem destacada</small></span><span><b>⏱️ 35' HT</b><small>janela específica de escanteios do Chat Máfia</small></span><span><b>80' → 85'</b><small>preparação e janela tardia para escanteios/gol</small></span><span><b>🔵→🟢→🏆</b><small>MatchIntel alerta somente ao subir para OPORTUNIDADE/FORTE/ELITE</small></span></div>${log.length?`<div class="sa-list">${log.slice(0,12).map(saRenderRow).join('')}</div>`:`<div class="sa-empty">Nenhum Smart Alert disparado ainda. O motor está armado.</div>`}<p class="sa-note">P9.3 mantém dois eixos independentes: prioridade externa do Chat Máfia e concordância interna do MatchIntel. Um FIXADO/APITOU nunca é escondido por divergência; ele é sinalizado com aviso. Divergência impede promoção automática, não a visibilidade do sinal.</p>`;
+    root.innerHTML=`<div class="sa-rules"><span><b>🔥 FIXADO</b><small>alerta mesmo com divergência; divergência vem destacada</small></span><span><b>⏱️ 35' HT</b><small>janela específica de escanteios do Chat Máfia</small></span><span><b>80' → 85'</b><small>preparação e janela tardia para escanteios/gol</small></span><span><b>🔵→🟢→🏆</b><small>MatchIntel alerta somente ao subir para OPORTUNIDADE/FORTE/ELITE</small></span></div>${log.length?`<div class="sa-list">${log.slice(0,12).map(saRenderRow).join('')}</div>`:`<div class="sa-empty">Nenhum Smart Alert disparado ainda. O motor está armado.</div>`}<p class="sa-note">P9.3 mantém dois eixos independentes; no P9.4 o backend é responsável pelo push e esta camada local fica como log/visual.  prioridade externa do Chat Máfia e concordância interna do MatchIntel. Um FIXADO/APITOU nunca é escondido por divergência; ele é sinalizado com aviso. Divergência impede promoção automática, não a visibilidade do sinal.</p>`;
   }catch(e){root.innerHTML=`<div class="sa-empty">Smart Alert Center indisponível · ${saEsc(e.message)}</div>`}
 }
 window.addEventListener('DOMContentLoaded',()=>{saLoad();setInterval(saLoad,15000)});

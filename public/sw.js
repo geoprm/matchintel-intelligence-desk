@@ -1,4 +1,4 @@
-const CACHE="matchintel-shell-p9-3-v1";
+const CACHE="matchintel-shell-p9-4-v1";
 const ASSETS=["/","/index.html","/styles.css","/app.js","/daily-tickets.js","/performance-lab.js","/backtest-lab.js","/value-board.js","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 
 self.addEventListener("install",e=>{
