@@ -269,3 +269,7 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 .lo-match.degraded{border-color:rgba(241,200,107,.20)}
 .lo-fresh.stale,.lo-fresh.unknown{color:#ff8d83;border-color:rgba(255,141,131,.34);background:rgba(255,141,131,.07)}
 .lo-summary{grid-template-columns:repeat(auto-fit,minmax(92px,1fr))}
+
+
+/* P11.0.3 PRELIVE KICKOFF */
+.match .minute.pre-kickoff{font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:.01em}.match .teams small{line-height:1.25}

@@ -17,8 +17,11 @@ const isPrelive=(m)=>{
   const s=String(m.state||m.phase||"").toUpperCase();
   return ["PRELIVE","PRE","NS","TBD","SCHEDULED","WATCH","UPCOMING"].includes(s) || (!!scheduledAt(m) && !isLive(m) && !/[FCA]T|FINISHED|CANC|ABD|PST/i.test(s));
 };
-const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
-const scheduledLabel=(m)=>{const d=scheduledAt(m);if(!d)return m.phase||m.state||"Pré-live";try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit"})}catch{return "Pré-live"}};
+/* P11_0_3_PRELIVE_KICKOFF_BRASILIA */
+const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.source_matrix?.fields?.kickoff?.value||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
+const scheduledClock=(m)=>{const d=scheduledAt(m);if(!d)return "—";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(d))}catch{return "—"}};
+const scheduledMeta=(m)=>{const d=scheduledAt(m);if(!d)return "horário pendente";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit"}).format(new Date(d))+" · Brasília"}catch{return "horário pendente"}};
+const scheduledLabel=(m)=>scheduledClock(m);
 /* P4A3_FEATURED_PRELIVE */
 function isFinishedMatch(m){
   const s=`${m?.state||""} ${m?.phase||""}`.toUpperCase();
@@ -166,10 +169,11 @@ function matchCard(m){
   const score=pre?"—":((m.home_score!=null&&m.away_score!=null)?`${m.home_score}–${m.away_score}`:"—");
   const prob=m.best_probability!=null?Math.round(Number(m.best_probability)):"—";
   const clock=pre?scheduledLabel(m):minuteLabel(m.minute,m.phase);
+  const kickoffMeta=pre?scheduledMeta(m):"";
   const marketLabel=m.best_market||(pre?preliveOperationalLabel(m):(m.radar_state||""));
   return `<div class="match ${featured?"featured":""}" data-match="${esc(m.match_key)}">
-    <div class="minute">${esc(clock)}</div>
-    <div class="teams"><strong>${esc(m.home)} × ${esc(m.away)} ${featured?'<span class="featured-badge">DESTAQUE</span>':""}</strong><small>${esc(m.competition||m.radar_state||m.state||"")}</small></div>
+    <div class="minute ${pre?"pre-kickoff":""}">${esc(clock)}</div>
+    <div class="teams"><strong>${esc(m.home)} × ${esc(m.away)} ${featured?'<span class="featured-badge">DESTAQUE</span>':""}</strong><small>${esc(m.competition||m.radar_state||m.state||"")}${kickoffMeta?` · ${esc(kickoffMeta)}`:""}</small></div>
     <div class="score">${score}</div>
     <div class="market">${esc(marketLabel)}<b>${prob}${prob!=="—"?"%":""}</b></div>
   </div>`;
