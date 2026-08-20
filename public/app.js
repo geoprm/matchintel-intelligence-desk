@@ -13,15 +13,44 @@ const empty=(title,body)=>`<div class="empty"><div class="icon">◌</div><h3>${e
 const fmtTime=(d)=>{try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"})}catch{return "—"}};
 const minuteLabel=(m,phase)=>m!=null?`${m}'`:(phase||"—");
 const isLive=(m)=>["LIVE","1H","HT","2H","ET","P"].includes(String(m.state||m.phase||"").toUpperCase());
+/* P11_0_4_PRELIVE_TRUTH_GATE */
+const PRELIVE_GRACE_MS=15*60*1000;
+const PRELIVE_MAX_AHEAD_MS=14*24*60*60*1000;
+const validPreliveKickoff=(m)=>{const raw=scheduledAt(m);if(!raw)return false;const t=new Date(raw).getTime();if(!Number.isFinite(t))return false;const d=t-Date.now();return d>=-PRELIVE_GRACE_MS&&d<=PRELIVE_MAX_AHEAD_MS};
 const isPrelive=(m)=>{
   const s=String(m.state||m.phase||"").toUpperCase();
-  return ["PRELIVE","PRE","NS","TBD","SCHEDULED","WATCH","UPCOMING"].includes(s) || (!!scheduledAt(m) && !isLive(m) && !/[FCA]T|FINISHED|CANC|ABD|PST/i.test(s));
+  const ls=String(m.lifecycle_state||"").toUpperCase();
+  if(ls&&ls!=="ATIVO")return false;
+  if(isLive(m)||/[FCA]T|FINISHED|CANC|ABD|PST/i.test(s))return false;
+  const pre=["PRELIVE","PRE","NS","TBD","SCHEDULED","WATCH","UPCOMING"].includes(s)||!!scheduledAt(m);
+  return pre&&validPreliveKickoff(m);
 };
 /* P11_0_3_PRELIVE_KICKOFF_BRASILIA */
 const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.source_matrix?.fields?.kickoff?.value||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
 const scheduledClock=(m)=>{const d=scheduledAt(m);if(!d)return "—";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(d))}catch{return "—"}};
 const scheduledMeta=(m)=>{const d=scheduledAt(m);if(!d)return "horário pendente";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit"}).format(new Date(d))+" · Brasília"}catch{return "horário pendente"}};
 const scheduledLabel=(m)=>scheduledClock(m);
+/* P11_0_4_CLIENT_CANONICAL_IDENTITY */
+function clientIdentityToken(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g,"_")}
+function clientPairKey(m){return `${clientIdentityToken(m?.home)}::${clientIdentityToken(m?.away)}`}
+function clientKickoffMs(m){const raw=scheduledAt(m);if(!raw)return null;const t=new Date(raw).getTime();return Number.isFinite(t)?t:null}
+function clientSameFixture(a,b){const ta=clientKickoffMs(a),tb=clientKickoffMs(b);if(ta==null)return true;if(tb==null)return false;return Math.abs(ta-tb)<=6*60*60*1000}
+function canonicalizeClientMatches(rows){
+  const officialByPair=new Map(),official=new Set();
+  for(const m of rows){const isOfficial=!!m?.provider_match_id||String(m?.match_key||"").startsWith("api:");if(!isOfficial)continue;official.add(m);const k=clientPairKey(m);if(!officialByPair.has(k))officialByPair.set(k,[]);officialByPair.get(k).push(m)}
+  const out=[],seen=new Set();
+  for(const m of rows){
+    const isOfficial=official.has(m),pair=clientPairKey(m);
+    if(!isOfficial){
+      const canon=(officialByPair.get(pair)||[]).find(o=>clientSameFixture(m,o));
+      if(canon)continue;
+      if(String(m?.lifecycle_state||"").toUpperCase()==="ATIVO"&&!validPreliveKickoff(m)&&!isLive(m))continue;
+    }
+    const key=isOfficial?`official:${m.provider_match_id||m.match_key}`:`alias:${pair}|${scheduledAt(m)||""}|${m.lifecycle_state||""}`;
+    if(seen.has(key))continue;seen.add(key);out.push(m);
+  }
+  return out;
+}
 /* P4A3_FEATURED_PRELIVE */
 function isFinishedMatch(m){
   const s=`${m?.state||""} ${m?.phase||""}`.toUpperCase();
@@ -104,8 +133,7 @@ async function loadAll(){
       q("matchintel_events","select=*&order=detected_at.desc&limit=300"),
       q("matchintel_system_status","select=*&id=eq.main&limit=1")
     ]);
-    const _seenMatches=new Set();
-    const matches=[...activeMatches,...historyMatches].filter(m=>{const k=m.match_key||m.provider_match_id||JSON.stringify([m.home,m.away,m.updated_at]);if(_seenMatches.has(k))return false;_seenMatches.add(k);return true});
+    const matches=canonicalizeClientMatches([...activeMatches,...historyMatches]);
     state.lifecycleSummary=Object.fromEntries((lifecycleRows||[]).map(x=>[x.lifecycle_state,Number(x.match_count||0)]));
     state.matches=matches; state.signals=dedupeSignals(signals); state.events=events; state.status=status[0]||null;
     render();

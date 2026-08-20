@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="2.3-P11.0.3";
+const VERSION="2.4-P11.0.4";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -125,8 +125,75 @@ function latestProviderFetchedAt(m){
   if(!candidates.length)return null;
   return candidates.sort((a,b)=>new Date(b)-new Date(a))[0];
 }
-function normalizeMatch(m){const home=extractHome(m),away=extractAway(m);if(!home||!away)return null;const providerId=m.provider_match_id??m.fixture?.id??m.id??m.matchId??null;const decision=m.bestDecision||m.decision||m.opportunity||m.shadowDecision||{};const sourceState=rawState(m),state=mapState(sourceState),sched=scheduledAt(m);const nowIso=new Date().toISOString(),providerFetchedAt=latestProviderFetchedAt(m),providerLive=liveLikeState(state,sourceState);const baseStats=m.stats||m.statistics||m.liveStats||{};const baseObj=(baseStats&&typeof baseStats==="object"&&!Array.isArray(baseStats)?baseStats:{});const stats={...baseObj,_matchintel:{...(baseObj._matchintel||{}),scheduledAt:sched,sourceState,discoveredBy:"bridge-p1103",marketIntel:m.marketIntel||baseObj?._matchintel?.marketIntel||null,bridgeSyncedAt:nowIso,providerFetchedAt:providerFetchedAt,freshnessBasis:providerLive?"PROVIDER":"BRIDGE"}};const truthfulUpdatedAt=providerLive?(providerFetchedAt||"1970-01-01T00:00:00.000Z"):nowIso;return{match_key:text(m.match_key,m.matchKey,m.key,providerId!=null?`api:${providerId}`:null,`${home}::${away}`.toLowerCase().replace(/\s+/g,"_")),provider_match_id:providerId!=null?String(providerId):null,home,away,competition:text(m.competition,m.league?.name,m.tournament?.name,m.fixture?.league?.name,typeof m.league==="string"?m.league:null),state,radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state,m.trackingState,state==="PRELIVE"?"PRE-LIVE RADAR":null),minute:num(m.minute,m.elapsed,m.status?.elapsed,m.clock?.minute,m.fixture?.status?.elapsed),phase:text(m.phase,m.period,m.status?.short,m.fixture?.status?.short,sourceState),home_score:num(m.home_score,m.homeScore,m.score?.home,m.goals?.home,m.fixture?.goals?.home),away_score:num(m.away_score,m.awayScore,m.score?.away,m.goals?.away,m.fixture?.goals?.away),data_quality:num(m.data_quality,m.dataQuality,m.quality,m.dqi,m.DQI),independent_sources:num(m.independent_sources,m.independentSources,m.sourceMatrix?.independentSportsSources,m.sourceMatrix?.independentSources)||0,source_matrix_state:text(m.source_matrix_state,m.sourceMatrixState,m.sourceMatrix?.state),conflicts:num(m.conflicts,m.sourceMatrix?.conflicts)||0,best_market:text(m.best_market,decision.market,decision.bestMarket,m.market),best_level:text(m.best_level,decision.level,decision.classification,m.level),best_probability:num(m.best_probability,decision.probability,decision.score,m.probability),best_explanation:text(m.best_explanation,decision.explanation,decision.why,m.explanation),priority:num(m.priority,m.adaptiveFocus?.priority,m.candidateScore),refresh_seconds:num(m.refresh_seconds,m.adaptiveFocus?.refreshSeconds),origin:text(m.origin,m.source,"gateway-autonomous"),stats,source_matrix:m.source_matrix||m.sourceMatrix||{},risks:Array.isArray(m.risks||decision.risks)?(m.risks||decision.risks):[],updated_at:truthfulUpdatedAt}}
-function dedupeMatches(rows){const map=new Map();for(const m of rows.map(normalizeMatch).filter(Boolean)){const key=m.provider_match_id?`id:${m.provider_match_id}`:`${m.home}|${m.away}|${m.stats?._matchintel?.scheduledAt||""}`.toLowerCase();const old=map.get(key);if(!old||Number(m.priority||0)>=Number(old.priority||0))map.set(key,m)}return[...map.values()]}
+function normalizeMatch(m){const home=extractHome(m),away=extractAway(m);if(!home||!away)return null;const providerId=m.provider_match_id??m.fixture?.id??m.id??m.matchId??null;const decision=m.bestDecision||m.decision||m.opportunity||m.shadowDecision||{};const sourceState=rawState(m),state=mapState(sourceState),sched=scheduledAt(m);const nowIso=new Date().toISOString(),providerFetchedAt=latestProviderFetchedAt(m),providerLive=liveLikeState(state,sourceState);const baseStats=m.stats||m.statistics||m.liveStats||{};const baseObj=(baseStats&&typeof baseStats==="object"&&!Array.isArray(baseStats)?baseStats:{});const stats={...baseObj,_matchintel:{...(baseObj._matchintel||{}),scheduledAt:sched,sourceState,discoveredBy:"bridge-p1104",marketIntel:m.marketIntel||baseObj?._matchintel?.marketIntel||null,bridgeSyncedAt:nowIso,providerFetchedAt:providerFetchedAt,freshnessBasis:providerLive?"PROVIDER":"BRIDGE",canonicalIdentity:providerId!=null?"PROVIDER_ID":"ALIAS"}};const truthfulUpdatedAt=providerLive?(providerFetchedAt||"1970-01-01T00:00:00.000Z"):nowIso;return{match_key:text(m.match_key,m.matchKey,m.key,providerId!=null?`api:${providerId}`:null,`${home}::${away}`.toLowerCase().replace(/\s+/g,"_")),provider_match_id:providerId!=null?String(providerId):null,home,away,competition:text(m.competition,m.league?.name,m.tournament?.name,m.fixture?.league?.name,typeof m.league==="string"?m.league:null),state,radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state,m.trackingState,state==="PRELIVE"?"PRE-LIVE RADAR":null),minute:num(m.minute,m.elapsed,m.status?.elapsed,m.clock?.minute,m.fixture?.status?.elapsed),phase:text(m.phase,m.period,m.status?.short,m.fixture?.status?.short,sourceState),home_score:num(m.home_score,m.homeScore,m.score?.home,m.goals?.home,m.fixture?.goals?.home),away_score:num(m.away_score,m.awayScore,m.score?.away,m.goals?.away,m.fixture?.goals?.away),data_quality:num(m.data_quality,m.dataQuality,m.quality,m.dqi,m.DQI),independent_sources:num(m.independent_sources,m.independentSources,m.sourceMatrix?.independentSportsSources,m.sourceMatrix?.independentSources)||0,source_matrix_state:text(m.source_matrix_state,m.sourceMatrixState,m.sourceMatrix?.state),conflicts:num(m.conflicts,m.sourceMatrix?.conflicts)||0,best_market:text(m.best_market,decision.market,decision.bestMarket,m.market),best_level:text(m.best_level,decision.level,decision.classification,m.level),best_probability:num(m.best_probability,decision.probability,decision.score,m.probability),best_explanation:text(m.best_explanation,decision.explanation,decision.why,m.explanation),priority:num(m.priority,m.adaptiveFocus?.priority,m.candidateScore),refresh_seconds:num(m.refresh_seconds,m.adaptiveFocus?.refreshSeconds),origin:text(m.origin,m.source,"gateway-autonomous"),stats,source_matrix:m.source_matrix||m.sourceMatrix||{},risks:Array.isArray(m.risks||decision.risks)?(m.risks||decision.risks):[],updated_at:truthfulUpdatedAt}}
+/* P11_0_4_CANONICAL_MATCH_IDENTITY */
+let identityStats={mergedAliases:0,suppressedUnsafePrelive:0,keptAliases:0,official:0};
+function identityToken(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/\s+/g,"_")}
+function pairKey(m){return `${identityToken(m?.home)}::${identityToken(m?.away)}`}
+function scheduleMs(m){const raw=m?.stats?._matchintel?.scheduledAt||null;if(!raw)return null;const t=new Date(raw).getTime();return Number.isFinite(t)?t:null}
+function validOperationalPrelive(m){
+  if(String(m?.state||"").toUpperCase()!=="PRELIVE")return true;
+  const t=scheduleMs(m);if(!t)return false;
+  const now=Date.now();return t>=now-15*60*1000&&t<=now+14*24*60*60*1000;
+}
+function sameFixture(a,b){
+  const ta=scheduleMs(a),tb=scheduleMs(b);
+  if(ta==null)return true; // alias sem kickoff nunca vence uma identidade oficial do mesmo par
+  if(tb==null)return false;
+  return Math.abs(ta-tb)<=6*60*60*1000;
+}
+function betterRow(a,b){
+  const pa=Number(a?.priority||0),pb=Number(b?.priority||0);
+  const da=Number(a?.data_quality||0),db=Number(b?.data_quality||0);
+  const ta=new Date(a?.updated_at||0).getTime()||0,tb=new Date(b?.updated_at||0).getTime()||0;
+  return pb>pa||db>da||tb>ta?b:a;
+}
+function mergeAliasIntoOfficial(official,alias){
+  const out={...official};
+  for(const k of ["radar_state","best_market","best_level","best_explanation"])if(!out[k]&&alias[k])out[k]=alias[k];
+  for(const k of ["priority","data_quality","independent_sources"])out[k]=Math.max(Number(out[k]||0),Number(alias[k]||0))||out[k]||alias[k]||0;
+  if(out.best_probability==null&&alias.best_probability!=null)out.best_probability=alias.best_probability;
+  const risks=[...(Array.isArray(out.risks)?out.risks:[]),...(Array.isArray(alias.risks)?alias.risks:[])];
+  out.risks=[...new Set(risks.map(String))];
+  out.stats={...(out.stats||{}),_matchintel:{...(out.stats?._matchintel||{}),aliasMerged:true,canonicalIdentity:"PROVIDER_ID"}};
+  return out;
+}
+function dedupeMatches(rows){
+  identityStats={mergedAliases:0,suppressedUnsafePrelive:0,keptAliases:0,official:0};
+  const normalized=rows.map(normalizeMatch).filter(Boolean);
+  const officialById=new Map(),aliases=[];
+  for(const m of normalized){
+    if(m.provider_match_id){
+      const k=String(m.provider_match_id),old=officialById.get(k);
+      officialById.set(k,old?betterRow(old,m):m);
+    }else aliases.push(m);
+  }
+  const officials=[...officialById.values()];
+  identityStats.official=officials.length;
+  const byPair=new Map();
+  for(const o of officials){const k=pairKey(o);if(!byPair.has(k))byPair.set(k,[]);byPair.get(k).push(o)}
+  const keptAliases=[];
+  for(const a of aliases){
+    const candidates=byPair.get(pairKey(a))||[];
+    const canonical=candidates.find(o=>sameFixture(a,o))||null;
+    if(canonical){
+      const idx=officials.findIndex(o=>o===canonical);
+      officials[idx]=mergeAliasIntoOfficial(canonical,a);
+      const arr=byPair.get(pairKey(a))||[];
+      const ai=arr.findIndex(o=>o===canonical);if(ai>=0)arr[ai]=officials[idx];
+      identityStats.mergedAliases++;
+      continue;
+    }
+    if(!validOperationalPrelive(a)){identityStats.suppressedUnsafePrelive++;continue}
+    keptAliases.push(a);identityStats.keptAliases++;
+  }
+  const map=new Map();
+  for(const m of [...officials,...keptAliases]){
+    const key=m.provider_match_id?`id:${m.provider_match_id}`:`alias:${pairKey(m)}|${m.stats?._matchintel?.scheduledAt||""}`;
+    const old=map.get(key);map.set(key,old?betterRow(old,m):m);
+  }
+  return [...map.values()];
+}
 function normalizeEvent(e){const event_type=text(e.event_type,e.eventType,e.type,e.name);if(!event_type)return null;const matchKey=text(e.match_key,e.matchKey)||(e.matchId?`api:${String(e.matchId)}`:null);return{match_key:matchKey,event_type,side:text(e.side,e.team),observed_minute:num(e.observed_minute,e.observedMinute,e.minute),detected_at:isoTime(e.detected_at??e.detectedAt??e.timestamp)??new Date().toISOString(),payload:e.payload||e}}
 
 const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/prelive","/live","/focus","/scanner","/auto-scan"];
@@ -194,14 +261,14 @@ async function tick(){
   const perfLabel=perfSnapshot?` perf=${perfSnapshot.settled_count||0}S/${perfSnapshot.observed_bets||0}O yield=${perfSnapshot.yield_pct==null?"—":Number(perfSnapshot.yield_pct).toFixed(1)+"%"}`:"";
   const btLabel=backtestR?` replay=${backtestR.source_quality?.audit_eligible||0}A/${backtestR.walk_forward?.prediction_count||0}W cand=${backtestR.candidate_count||0} promote=${backtestR.promotion_count||0}`:"";
   const histLabel=historyR?` hist=${historyR.history?.fixtures||0}/${historyR.targetFixtures||600} days=${historyR.history?.backfilledDays||0}/${historyR.targetDays||35} hphase=${historyR.phase||"?"}`:"";
-  console.log(new Date().toLocaleTimeString(),`P11.0.2 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  console.log(new Date().toLocaleTimeString(),`P11.0.4 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
-  if(activeRoutes)console.log("  radar sources ->",activeRoutes);
+  if(activeRoutes)console.log("  radar sources ->",activeRoutes);console.log("  identity ->",`official=${identityStats.official} merged=${identityStats.mergedAliases} unsafe_prelive_blocked=${identityStats.suppressedUnsafePrelive} aliases_kept=${identityStats.keptAliases}`);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.2 FRESHNESS | intervalo ${every/1000}s`);
-console.log("P11.0.2 usa providerFetchedAt para LIVE; bridgeSyncedAt fica separado. P7/P6 continuam preservados.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.4 CANONICAL IDENTITY | intervalo ${every/1000}s`);
+console.log("P11.0.4: provider ID vence alias; PRELIVE sem kickoff futuro valido nao e publicado. Freshness P11.0.2 permanece ativa.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

@@ -273,3 +273,7 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 
 /* P11.0.3 PRELIVE KICKOFF */
 .match .minute.pre-kickoff{font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:.01em}.match .teams small{line-height:1.25}
+
+
+/* P11.0.4 PRELIVE TRUTH */
+.match .minute.pre-kickoff{min-width:46px}.match .teams small{white-space:normal}
