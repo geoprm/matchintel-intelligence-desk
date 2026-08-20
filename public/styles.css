@@ -285,3 +285,8 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 #statusPills{flex-wrap:wrap;justify-content:flex-end}
 #statusPills .pill{white-space:nowrap}
 @media(max-width:520px){#statusPills{gap:7px}#statusPills .pill{font-size:11px;padding:7px 9px}}
+
+/* P11_0_5_3_1_EMPTY_STATE_MICROFINISH_CSS */
+.lo-empty-settled{min-height:150px}
+.lo-empty-settled .lo-pulse{display:none!important;animation:none!important}
+.lo-settled-icon{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:1px solid rgba(117,231,184,.22);background:rgba(117,231,184,.055);color:rgba(117,231,184,.72);font-size:15px;font-weight:800;margin-bottom:6px}
