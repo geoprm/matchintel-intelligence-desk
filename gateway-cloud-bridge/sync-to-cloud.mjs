@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="2.5-P11.0.5";
+const VERSION="2.6-P11.0.5.2";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -112,16 +112,27 @@ function scheduledAt(m){
   return null;
 }
 /* P11_0_2_PROVIDER_TRUTH */
-function liveLikeState(state,phase){const s=`${state||""} ${phase||""}`.toUpperCase();return /(^|\s)(LIVE|1H|HT|2H|ET|P)(\s|$)/.test(s)&&!/(FT|FINISHED|AET|PEN)/.test(s)}
-function latestProviderFetchedAt(m){
+/* P11_0_5_2_LIVE_PHASE_FRESHNESS_AUTHORITY */
+function liveLikeState(state,phase){
+  const s=`${state||""} ${phase||""}`.toUpperCase();
+  return /(^|\s)(LIVE|1H|HT|2H|ET|P|BT)(\s|$)/.test(s)&&!/(FT|FINISHED|AET|PEN)/.test(s)
+}
+function explicitPhase(m,sourceState=null){
+  return text(m?.phase,m?.period,m?.status?.short,m?.fixture?.status?.short,sourceState)
+}
+function phaseSaysLive(m,sourceState=null){
+  return liveLikeState(null,explicitPhase(m,sourceState))
+}
+function latestProviderFetchedAt(m,{strictLive=false}={}){
   const candidates=[];
   const add=v=>{const x=isoTime(v);if(x)candidates.push(x)};
   add(m?.provider_fetched_at);add(m?.providerFetchedAt);add(m?.stats?._matchintel?.providerFetchedAt);
+  add(m?.provider_updated_at);add(m?.providerUpdatedAt);
   const sm=m?.source_matrix||m?.sourceMatrix||{};
-  add(sm?.providerFetchedAt);add(sm?.provider_fetched_at);add(sm?.updatedAt);
+  add(sm?.providerFetchedAt);add(sm?.provider_fetched_at);
   for(const o of Array.isArray(sm?.observations)?sm.observations:[]){add(o?.fetchedAt);add(o?.fetched_at);add(o?.observedAt);add(o?.timestamp)}
-  // Gateway rows may expose their provider refresh timestamp directly. This is only a fallback when source-matrix evidence is absent.
-  if(!candidates.length){add(m?.provider_updated_at);add(m?.providerUpdatedAt);add(m?.updated_at);add(m?.updatedAt)}
+  // For LIVE, relay/generic updated_at is NEVER accepted as provider freshness evidence.
+  if(!strictLive&&!candidates.length){add(sm?.updatedAt);add(m?.updated_at);add(m?.updatedAt)}
   if(!candidates.length)return null;
   return candidates.sort((a,b)=>new Date(b)-new Date(a))[0];
 }
@@ -142,13 +153,15 @@ function normalizeMatch(m){
   const providerRaw=m.provider_match_id??m.fixture?.id??m.id??m.matchId??null;
   const providerId=canonicalProviderId(providerRaw,m);
   const decision=m.bestDecision||m.decision||m.opportunity||m.shadowDecision||{};
-  const sourceState=rawState(m),state=mapState(sourceState),sched=scheduledAt(m);
-  const nowIso=new Date().toISOString(),providerFetchedAt=latestProviderFetchedAt(m),providerLive=liveLikeState(state,sourceState);
+  const sourceState=rawState(m),phaseValue=explicitPhase(m,sourceState),phaseLive=phaseSaysLive(m,sourceState);
+  const mappedState=mapState(sourceState),state=phaseLive?"LIVE":mappedState,sched=scheduledAt(m);
+  const providerLive=phaseLive||liveLikeState(mappedState,phaseValue);
+  const nowIso=new Date().toISOString(),providerFetchedAt=latestProviderFetchedAt(m,{strictLive:providerLive});
   const baseStats=m.stats||m.statistics||m.liveStats||{};
   const baseObj=(baseStats&&typeof baseStats==="object"&&!Array.isArray(baseStats)?baseStats:{});
   const canonicalKey=canonicalProviderMatchKey(providerId);
   const incomingKey=text(m.match_key,m.matchKey,m.key);
-  const stats={...baseObj,_matchintel:{...(baseObj._matchintel||{}),scheduledAt:sched,sourceState,discoveredBy:"bridge-p1105",marketIntel:m.marketIntel||baseObj?._matchintel?.marketIntel||null,bridgeSyncedAt:nowIso,providerFetchedAt:providerFetchedAt,freshnessBasis:providerLive?"PROVIDER":"BRIDGE",canonicalIdentity:providerId!=null?"PROVIDER_ID":"ALIAS",incomingMatchKey:incomingKey,canonicalMatchKey:canonicalKey}};
+  const stats={...baseObj,_matchintel:{...(baseObj._matchintel||{}),scheduledAt:sched,sourceState,discoveredBy:"bridge-p11052",marketIntel:m.marketIntel||baseObj?._matchintel?.marketIntel||null,bridgeSyncedAt:nowIso,providerFetchedAt:providerFetchedAt,freshnessBasis:providerLive?(providerFetchedAt?"PROVIDER":"PROVIDER_MISSING"):"BRIDGE",livePhaseAuthority:phaseLive,canonicalIdentity:providerId!=null?"PROVIDER_ID":"ALIAS",incomingMatchKey:incomingKey,canonicalMatchKey:canonicalKey}};
   const truthfulUpdatedAt=providerLive?(providerFetchedAt||"1970-01-01T00:00:00.000Z"):nowIso;
   return{
     match_key:canonicalKey||text(incomingKey,`${home}::${away}`.toLowerCase().replace(/\s+/g,"_")),
@@ -156,9 +169,9 @@ function normalizeMatch(m){
     home,away,
     competition:text(m.competition,m.league?.name,m.tournament?.name,m.fixture?.league?.name,typeof m.league==="string"?m.league:null),
     state,
-    radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state,m.trackingState,state==="PRELIVE"?"PRE-LIVE RADAR":null),
+    radar_state:text(m.radar_state,m.radarState,m.focusState,m.adaptiveFocus?.state,m.trackingState,!["LIVE","PRELIVE","FINISHED"].includes(String(sourceState||"").toUpperCase())?sourceState:null,state==="PRELIVE"?"PRE-LIVE RADAR":null),
     minute:num(m.minute,m.elapsed,m.status?.elapsed,m.clock?.minute,m.fixture?.status?.elapsed),
-    phase:text(m.phase,m.period,m.status?.short,m.fixture?.status?.short,sourceState),
+    phase:phaseValue,
     home_score:num(m.home_score,m.homeScore,m.score?.home,m.goals?.home,m.fixture?.goals?.home),
     away_score:num(m.away_score,m.awayScore,m.score?.away,m.goals?.away,m.fixture?.goals?.away),
     data_quality:num(m.data_quality,m.dataQuality,m.quality,m.dqi,m.DQI),
@@ -318,14 +331,17 @@ async function tick(){
   const perfLabel=perfSnapshot?` perf=${perfSnapshot.settled_count||0}S/${perfSnapshot.observed_bets||0}O yield=${perfSnapshot.yield_pct==null?"—":Number(perfSnapshot.yield_pct).toFixed(1)+"%"}`:"";
   const btLabel=backtestR?` replay=${backtestR.source_quality?.audit_eligible||0}A/${backtestR.walk_forward?.prediction_count||0}W cand=${backtestR.candidate_count||0} promote=${backtestR.promotion_count||0}`:"";
   const histLabel=historyR?` hist=${historyR.history?.fixtures||0}/${historyR.targetFixtures||600} days=${historyR.history?.backfilledDays||0}/${historyR.targetDays||35} hphase=${historyR.phase||"?"}`:"";
-  console.log(new Date().toLocaleTimeString(),`P11.0.5 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  console.log(new Date().toLocaleTimeString(),`P11.0.5.2 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
-  if(activeRoutes)console.log("  radar sources ->",activeRoutes);console.log("  identity ->",`official=${identityStats.official} canonical_keys=${identityStats.canonicalProviderKeys} merged=${identityStats.mergedAliases} stale_prelive_blocked=${identityStats.suppressedOfficialPrelive+identityStats.suppressedUnsafePrelive} aliases_kept=${identityStats.keptAliases}`);
+  if(activeRoutes)console.log("  radar sources ->",activeRoutes);
+  console.log("  identity ->",`official=${identityStats.official} canonical_keys=${identityStats.canonicalProviderKeys} merged=${identityStats.mergedAliases} stale_prelive_blocked=${identityStats.suppressedOfficialPrelive+identityStats.suppressedUnsafePrelive} aliases_kept=${identityStats.keptAliases}`);
+  const liveRows=matches.filter(m=>liveLikeState(m.state,m.phase)),liveMissing=liveRows.filter(m=>!m?.stats?._matchintel?.providerFetchedAt).length,liveBridge=liveRows.filter(m=>m?.stats?._matchintel?.freshnessBasis==="BRIDGE").length;
+  console.log("  live freshness ->",`live=${liveRows.length} provider_missing=${liveMissing} bridge_basis=${liveBridge}`);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.5 PROVIDER-ID AUTHORITY | intervalo ${every/1000}s`);
-console.log("P11.0.5: match_key canonica deriva do provider_match_id; PRELIVE vencido e bloqueado inclusive quando oficial. Lifecycle cloud dedup permanece ativo.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.5.2 LIVE FRESHNESS | intervalo ${every/1000}s`);
+console.log("P11.0.5.2: fase 1H/HT/2H/ET/P/BT tem autoridade LIVE; relay/updated_at nunca vale como freshness esportiva. LIVE sem providerFetchedAt = STALE/EXPIRADO.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

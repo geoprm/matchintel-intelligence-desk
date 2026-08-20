@@ -585,3 +585,5 @@ initPushUI();
 setInterval(loadAll,20000);
 
 /* P11_0_5_CANONICAL_CLOUD: lifecycle cloud dedup + provider-ID authority are enforced upstream. */
+
+/* P11_0_5_2_LIVE_PHASE_FRESHNESS_AUTHORITY: live truth is provider-time based upstream. */

@@ -1,0 +1,7 @@
+-- P11.0.5.2 backend migration has already been applied in Supabase production.
+-- Migration name: p11_0_5_2_live_phase_freshness_authority
+-- LIVE lifecycle authority:
+--   provider_fetched_at IS NOT NULL
+--   freshness_basis = 'PROVIDER'
+--   provider_fetched_at BETWEEN now()-7min AND now()+2min
+-- Otherwise LIVE-like phase/state => EXPIRADO.
