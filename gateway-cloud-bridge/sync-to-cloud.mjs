@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="2.7-P11.0.5.3";
+const VERSION="2.8-P11.0.5.4+P11.0.5.5";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -25,15 +25,16 @@ const ticketIngestUrl=env.MATCHINTEL_TICKET_INGEST_URL||ingestUrl.replace(/\/mat
 const valueIngestUrl=env.MATCHINTEL_VALUE_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-value-ingest");
 const performanceIngestUrl=env.MATCHINTEL_PERFORMANCE_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-performance-ingest");
 const backtestIngestUrl=env.MATCHINTEL_BACKTEST_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-backtest-ingest");
+const observabilityIngestUrl=env.MATCHINTEL_OBSERVABILITY_INGEST_URL||ingestUrl.replace(/\/matchintel-ingest\/?$/,"/matchintel-observability-ingest");
 const every=Math.max(10000,Number(env.MATCHINTEL_SYNC_MS||20000));
 if(!gatewayToken||!ingestUrl||!ingestKey){console.error("[ERRO] Configuracao incompleta.");process.exit(1)}
 
 const stateFile=path.join(here,".data","cloud-bridge-p3.json");
 fs.mkdirSync(path.dirname(stateFile),{recursive:true});
-let seen={version:5,initialized:false,signals:{},preliveCache:{}};
+let seen={version:6,initialized:false,signals:{},preliveCache:{},quotaForwarded:{},linkForwarded:{}};
 try{
   const old=JSON.parse(fs.readFileSync(stateFile,"utf8"));
-  if(old&&typeof old==="object")seen={...seen,...old,version:5,signals:old.signals||{},preliveCache:old.preliveCache||{}};
+  if(old&&typeof old==="object")seen={...seen,...old,version:6,signals:old.signals||{},preliveCache:old.preliveCache||{},quotaForwarded:old.quotaForwarded||{},linkForwarded:old.linkForwarded||{}};
 }catch{}
 const saveSeen=()=>{try{fs.writeFileSync(stateFile,JSON.stringify(seen,null,2))}catch{}};
 const sha=s=>crypto.createHash("sha256").update(s).digest("hex");
@@ -321,7 +322,7 @@ const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/preli
 async function tick(){
   const routes=await Promise.all(discoveryRoutes.map(async route=>[route,await getJson(route)]));
   const routeMap=Object.fromEntries(routes);
-  const [signalsR,statusR,eventsR,p3R,ticketsR,valueR,performanceR,backtestR,historyR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets"),getJson("/value-board"),getJson("/performance"),getJson("/backtest"),getJson("/history-status")]);
+  const [signalsR,statusR,eventsR,p3R,ticketsR,valueR,performanceR,backtestR,historyR,quotaR,linksR,quotaTruthR]=await Promise.all([getJson("/signals"),getJson("/status"),getJson("/events"),getJson("/p3-status"),getJson("/daily-tickets"),getJson("/value-board"),getJson("/performance"),getJson("/backtest"),getJson("/history-status"),getJson("/quota-audit?limit=250"),getJson("/telegram-links?limit=250"),getJson("/quota-truth")]);
   const radar=routeMap["/radar"];
   if(!radar&&!statusR&&!routes.some(([,v])=>v)){console.log(new Date().toLocaleTimeString(),"Gateway indisponivel; aguardando...");return}
 
@@ -347,6 +348,23 @@ async function tick(){
   const r=await fetch(ingestUrl,{method:"POST",headers:{"content-type":"application/json","x-matchintel-key":ingestKey},body:JSON.stringify({matches,events,signals,status}),signal:AbortSignal.timeout(12000)});
   const raw=await r.text();if(!r.ok)throw new Error(`Cloud ${r.status}: ${raw}`);
   let cloud={};try{cloud=JSON.parse(raw)}catch{}
+
+  /* P11_0_5_4_5_OBSERVABILITY_FORWARD */
+  const quotaRows=Array.isArray(quotaR?.rows)?quotaR.rows:[],linkRows=Array.isArray(linksR?.links)?linksR.links:[];
+  const newQuota=quotaRows.filter(x=>x?.request_id&&!seen.quotaForwarded[x.request_id]).slice(0,200);
+  const newLinks=linkRows.filter(x=>x?.link_key&&!seen.linkForwarded[x.link_key]).slice(0,200);
+  if(newQuota.length||newLinks.length){
+    try{
+      const or=await fetch(observabilityIngestUrl,{method:"POST",headers:{"content-type":"application/json","x-matchintel-key":ingestKey},body:JSON.stringify({quota_audit:newQuota,telegram_links:newLinks}),signal:AbortSignal.timeout(12000)});
+      const ot=await or.text();if(!or.ok)throw new Error(`ObservabilityCloud ${or.status}: ${ot}`);
+      for(const x of newQuota)seen.quotaForwarded[x.request_id]=Date.now();
+      for(const x of newLinks)seen.linkForwarded[x.link_key]=Date.now();
+      const cutoff=Date.now()-7*24*60*60*1000;
+      for(const [k,v] of Object.entries(seen.quotaForwarded))if(Number(v)<cutoff)delete seen.quotaForwarded[k];
+      for(const [k,v] of Object.entries(seen.linkForwarded))if(Number(v)<cutoff)delete seen.linkForwarded[k];
+      saveSeen();
+    }catch(e){console.error("observability cloud:",e.message)}
+  }
   const tickets=Array.isArray(ticketsR?.tickets)?ticketsR.tickets:[];
   let ticketCloud={};
   if(tickets.length){
@@ -383,18 +401,20 @@ async function tick(){
   const perfLabel=perfSnapshot?` perf=${perfSnapshot.settled_count||0}S/${perfSnapshot.observed_bets||0}O yield=${perfSnapshot.yield_pct==null?"—":Number(perfSnapshot.yield_pct).toFixed(1)+"%"}`:"";
   const btLabel=backtestR?` replay=${backtestR.source_quality?.audit_eligible||0}A/${backtestR.walk_forward?.prediction_count||0}W cand=${backtestR.candidate_count||0} promote=${backtestR.promotion_count||0}`:"";
   const histLabel=historyR?` hist=${historyR.history?.fixtures||0}/${historyR.targetFixtures||600} days=${historyR.history?.backfilledDays||0}/${historyR.targetDays||35} hphase=${historyR.phase||"?"}`:"";
-  console.log(new Date().toLocaleTimeString(),`P11.0.5.3 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  console.log(new Date().toLocaleTimeString(),`P11.0.5.4/5.5 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
   if(activeRoutes)console.log("  radar sources ->",activeRoutes);
   console.log("  identity ->",`official=${identityStats.official} canonical_keys=${identityStats.canonicalProviderKeys} merged=${identityStats.mergedAliases} stale_prelive_blocked=${identityStats.suppressedOfficialPrelive+identityStats.suppressedUnsafePrelive} aliases_kept=${identityStats.keptAliases}`);
   const liveRows=matches.filter(m=>liveLikeState(m.state,m.phase)),liveMissing=liveRows.filter(m=>!m?.stats?._matchintel?.providerFetchedAt).length,liveBridge=liveRows.filter(m=>m?.stats?._matchintel?.freshnessBasis==="BRIDGE").length;
   console.log("  live freshness ->",`live=${liveRows.length} provider_missing=${liveMissing} bridge_basis=${liveBridge}`);
-  console.log("  operational feed ->",`prelive=${prelive} cached=${preliveCached} quota=${status.quota_daily_remaining??"?"} mode=${Number(status.quota_daily_remaining)<=20?"PAUSED_QUOTA":"ACTIVE"}`);
+  console.log("  operational feed ->",`prelive=${prelive} cached=${preliveCached} quota=${status.quota_daily_remaining??"?"} mode=${quotaTruthR?.mode|| (Number(status.quota_daily_remaining)<=20?"PAUSED_QUOTA":"ACTIVE")}`);
+  if(quotaTruthR)console.log("  quota truth ->",`today=${quotaTruthR.current_utc_day} header_today=${quotaTruthR.provider_header_today?"YES":"NO"} limit=${quotaTruthR.provider?.dailyLimit??"?"} remaining=${quotaTruthR.provider?.remainingDaily??"?"} requests_logged=${quotaTruthR.audit?.requests||0}`);
+  if(linkRows.length)console.log("  telegram links ->",`local=${linkRows.length} forwarded_new=${newLinks.length}`);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.5.3 OPERATIONAL RECOVERY | intervalo ${every/1000}s`);
-console.log("P11.0.5.3: LIVE continua provider-only; PRELIVE legitimo ganha cache de agenda ate o kickoff; timestamps absurdos sao rejeitados; quota baixa vira estado explicito.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P11.0.5.4 QUOTA TRUTH + P11.0.5.5 TELEGRAM LINK INTELLIGENCE | intervalo ${every/1000}s`);
+console.log("P11.0.5.4/5.5: quota real e auditada por request; slate diario cacheado; links Chat Mafia entram em discovery; Resenhas Bet tem peso zero como confirmacao.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

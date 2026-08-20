@@ -9,10 +9,12 @@ function tcSignalTime(s){return new Date(s?.occurred_at||s?.created_at||0).getTi
 function tcSignalFresh(s){const a=Date.now()-tcSignalTime(s);return a>=-120000&&a<=TC_SIGNAL_FRESH_MS}
 function tcMatchFresh(m){const a=tcAge(m?.updated_at);return a>=-120000&&a<=TC_MATCH_FRESH_MS}
 function tcNorm(s){return String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'')}
+/* P11_0_5_5_COMMUNITY_ZERO_WEIGHT */
 function tcProvider(s){
   const hay=tcNorm(`${s?.provider_family||''} ${s?.provider_name||''}`);
   if(hay.includes('BETZORD'))return {kind:'BETZORD',name:s?.provider_name||'BETZORD'};
   if(hay.includes('MAFIA'))return {kind:'CHAT_MAFIA',name:s?.provider_name||'CHAT MÁFIA'};
+  if(hay.includes('COMMUNITY_DISCOVERY')||hay.includes('RESENHAS_BET'))return {kind:'COMMUNITY',name:s?.provider_name||'Comunidade'};
   return {kind:'OTHER',name:s?.provider_name||s?.provider_family||'Telegram'};
 }
 function tcMarketFromText(text){
@@ -63,6 +65,7 @@ function tcMarketCompatible(signalMarket,modelMarket){
 function tcEvaluate(signal,match){
   const provider=tcProvider(signal),sm=tcSignalMarket(signal);
   if(!tcSignalFresh(signal))return {status:'REJEITADO',tone:'rejected',provider,signalMarket:sm,reason:'sinal expirado (>10 min)',support:0};
+  if(provider.kind==='COMMUNITY')return {status:'PARCIAL',tone:'partial',provider,signalMarket:sm,reason:'fonte comunitária: descoberta apenas · peso zero como confirmação independente',support:0};
   if(provider.kind==='BETZORD'&&sm.market!=='OVER_05_HT')return {status:'REJEITADO',tone:'rejected',provider,signalMarket:sm,reason:'política BetZord: somente Over 0.5 HT',support:0};
   if(!signal?.match_key||!match)return {status:'NÃO RESOLVIDO',tone:'unresolved',provider,signalMarket:sm,reason:'partida ainda não vinculada com segurança',support:0};
   if(sm.market==='OVER_05_HT'&&!tcHtWindowOpen(match))return {status:'REJEITADO',tone:'rejected',provider,signalMarket:sm,reason:'janela do Over 0.5 HT já encerrou',support:0};
@@ -105,7 +108,7 @@ window.MatchIntelTelegramConvergence={evaluate:tcEvaluate,forMatch:tcForMatch,su
 
 function tcStatusBadge(r){return `<span class="tc-status ${r.tone}">${tcEsc(r.status)}</span>`}
 function tcSourcePolicy(){
-  return `<div class="tc-policy"><div><b>🔥 CHAT MÁFIA TOP 1</b><small>mercados variáveis · só confirma quando mercado + jogo + dados convergem</small></div><div><b>🥇 BETZORD VIP / ⚜️ PREMIUM</b><small><strong>POLÍTICA FIXA: somente OVER 0.5 HT.</strong> Mercado inferido pela origem permanece PARCIAL até o parser resolver explicitamente.</small></div></div>`;
+  return `<div class="tc-policy"><div><b>🔥 CHAT MÁFIA TOP 1</b><small>link = descoberta prioritária; FIXADO/APITOU sobe prioridade, mas MatchIntel mantém o próprio crivo</small></div><div><b>🥇 BETZORD VIP / ⚜️ PREMIUM</b><small><strong>POLÍTICA FIXA: somente OVER 0.5 HT.</strong> Mercado inferido pela origem permanece PARCIAL até o parser resolver explicitamente.</small></div><div><b>💬 RESENHAS BET</b><small>COMMUNITY DISCOVERY · mensagens e links podem iniciar investigação, mas têm <strong>peso zero</strong> como confirmação.</small></div></div>`;
 }
 function tcRow(signal,match){
   const r=tcEvaluate(signal,match),sm=r.signalMarket,age=Math.max(0,Math.round((Date.now()-tcSignalTime(signal))/1000));
@@ -130,9 +133,10 @@ async function tcLoad(){
     for(const x of rows)counts[x.r.status]=(counts[x.r.status]||0)+1;
     const betzord=rows.filter(x=>x.r.provider.kind==='BETZORD').length;
     const mafia=rows.filter(x=>x.r.provider.kind==='CHAT_MAFIA').length;
+    const community=rows.filter(x=>x.r.provider.kind==='COMMUNITY').length;
     const badge=document.querySelector('#telegramConvergenceBadge');
     if(badge)badge.textContent=`${counts.CONFIRMA} confirma · ${counts.DIVERGE} diverge · ${counts['NÃO RESOLVIDO']} não resolvido`;
-    root.innerHTML=`${tcSourcePolicy()}<div class="tc-summary"><span><small>Confirma</small><b>${counts.CONFIRMA}</b></span><span><small>Parcial</small><b>${counts.PARCIAL}</b></span><span><small>Diverge</small><b>${counts.DIVERGE}</b></span><span><small>Rejeitado</small><b>${counts.REJEITADO}</b></span><span><small>Não resolvido</small><b>${counts['NÃO RESOLVIDO']}</b></span></div><div class="tc-source-count"><span>Chat Máfia: <b>${mafia}</b></span><span>BetZord: <b>${betzord}</b></span><span>Janela: <b>10 min</b></span></div>${rows.length?`<div class="tc-list">${rows.slice(0,20).map(x=>tcRow(x.s,x.m)).join('')}</div>`:`<div class="tc-empty">Nenhum sinal Telegram fresco nos últimos 10 minutos.</div>`}<p class="tc-note">P9.2 é SHADOW: Telegram nunca sobe uma oportunidade sozinho. CONFIRMA pode reforçar convergência; DIVERGE impede que o sinal seja usado como confirmação; NÃO RESOLVIDO permanece visível sem ser associado por aproximação insegura.</p>`;
+    root.innerHTML=`${tcSourcePolicy()}<div class="tc-summary"><span><small>Confirma</small><b>${counts.CONFIRMA}</b></span><span><small>Parcial</small><b>${counts.PARCIAL}</b></span><span><small>Diverge</small><b>${counts.DIVERGE}</b></span><span><small>Rejeitado</small><b>${counts.REJEITADO}</b></span><span><small>Não resolvido</small><b>${counts['NÃO RESOLVIDO']}</b></span></div><div class="tc-source-count"><span>Chat Máfia: <b>${mafia}</b></span><span>BetZord: <b>${betzord}</b></span><span>Comunidade: <b>${community}</b></span><span>Janela: <b>10 min</b></span></div>${rows.length?`<div class="tc-list">${rows.slice(0,20).map(x=>tcRow(x.s,x.m)).join('')}</div>`:`<div class="tc-empty">Nenhum sinal Telegram fresco nos últimos 10 minutos.</div>`}<p class="tc-note">P9.2 é SHADOW: Telegram nunca sobe uma oportunidade sozinho. CONFIRMA pode reforçar convergência; DIVERGE impede que o sinal seja usado como confirmação; NÃO RESOLVIDO permanece visível sem ser associado por aproximação insegura.</p>`;
   }catch(e){root.innerHTML=`<div class="tc-empty">Telegram × Dados indisponível · ${tcEsc(e.message)}</div>`}
 }
 window.addEventListener('DOMContentLoaded',()=>{tcLoad();setInterval(tcLoad,15000)});
