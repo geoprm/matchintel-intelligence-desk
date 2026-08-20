@@ -277,3 +277,11 @@ button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
 
 /* P11.0.4 PRELIVE TRUTH */
 .match .minute.pre-kickoff{min-width:46px}.match .teams small{white-space:normal}
+
+/* P11_0_5_3_STABILIZATION_UX */
+.settled-empty{min-height:150px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.settled-empty::before{content:"✓";font-size:22px;line-height:1;margin-bottom:12px;opacity:.42}
+.settled-empty .icon{display:none!important;animation:none!important}
+#statusPills{flex-wrap:wrap;justify-content:flex-end}
+#statusPills .pill{white-space:nowrap}
+@media(max-width:520px){#statusPills{gap:7px}#statusPills .pill{font-size:11px;padding:7px 9px}}

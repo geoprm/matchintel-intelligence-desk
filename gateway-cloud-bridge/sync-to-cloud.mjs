@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const VERSION="2.6-P11.0.5.2";
+const VERSION="2.7-P11.0.5.3";
 const SIGNAL_TTL_MS=10*60*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const here=path.dirname(fileURLToPath(import.meta.url));
@@ -30,8 +30,11 @@ if(!gatewayToken||!ingestUrl||!ingestKey){console.error("[ERRO] Configuracao inc
 
 const stateFile=path.join(here,".data","cloud-bridge-p3.json");
 fs.mkdirSync(path.dirname(stateFile),{recursive:true});
-let seen={version:4,initialized:false,signals:{}};
-try{const old=JSON.parse(fs.readFileSync(stateFile,"utf8"));if(old?.version===4)seen={...seen,...old}}catch{}
+let seen={version:5,initialized:false,signals:{},preliveCache:{}};
+try{
+  const old=JSON.parse(fs.readFileSync(stateFile,"utf8"));
+  if(old&&typeof old==="object")seen={...seen,...old,version:5,signals:old.signals||{},preliveCache:old.preliveCache||{}};
+}catch{}
 const saveSeen=()=>{try{fs.writeFileSync(stateFile,JSON.stringify(seen,null,2))}catch{}};
 const sha=s=>crypto.createHash("sha256").update(s).digest("hex");
 const auth={Authorization:`Bearer ${gatewayToken}`};
@@ -84,7 +87,22 @@ function findFlag(root,patterns){
   walk(root,0);return found;
 }
 function sourceEventId(s){const v=s.source_event_id??s.sourceEventId??s.telegram_message_id??s.telegramMessageId??s.message_id??s.messageId??s.msg_id??s.msgId;return v===null||v===undefined||v===""?null:String(v)}
-function isoTime(raw){if(raw===null||raw===undefined||raw==="")return null;if(typeof raw==="number"||/^\d{9,16}$/.test(String(raw).trim())){let n=Number(raw);if(!Number.isFinite(n))return null;if(n<1e12)n*=1000;const d=new Date(n);return Number.isFinite(d.getTime())?d.toISOString():null}const d=new Date(raw);return Number.isFinite(d.getTime())?d.toISOString():null}
+/* P11_0_5_3_SAFE_TIME */
+function isoTime(raw){
+  if(raw===null||raw===undefined||raw==="")return null;
+  if(typeof raw==="number"||/^\d{9,19}$/.test(String(raw).trim())){
+    let n=Number(raw);if(!Number.isFinite(n))return null;
+    if(n>1e17)n/=1e6;
+    else if(n>1e14)n/=1000;
+    else if(n<1e12)n*=1000;
+    const d=new Date(n);if(!Number.isFinite(d.getTime()))return null;
+    const y=d.getUTCFullYear();if(y<2020||y>2100)return null;
+    return d.toISOString();
+  }
+  const d=new Date(raw);if(!Number.isFinite(d.getTime()))return null;
+  const y=d.getUTCFullYear();if(y<2020||y>2100)return null;
+  return d.toISOString();
+}
 function parseSourceTime(s){const raw=s.source_occurred_at??s.sourceOccurredAt??s.telegramDate??s.messageDate??s.sentAt??s.date??s.occurred_at??s.occurredAt??s.sourceTimestamp??s.timestamp??null;return isoTime(raw)}
 function signalMatchKey(s){const explicit=text(s.match_key,s.matchKey,s.cloudMatchKey,s.match?.key);if(explicit)return explicit;const id=s.resolvedMatchId??s.matchId??s.match_id??null;return id!==null&&id!==undefined&&String(id).trim()?`api:${String(id).trim()}`:null}
 function extractUrls(s){const values=[s.bookmaker_url,s.bookmakerUrl,s.bet365_url,s.bet365Url,s.bet365Link,s.betano_url,s.betanoUrl,s.betanoLink,s.game_link,s.gameLink,s.link,s.url,s.raw_url,s.rawUrl,s.linkPreviewUrl,s.text,s.message,s.summary,s.text_summary,s.caption,s.rawText,...(Array.isArray(s.urls)?s.urls:[])].filter(v=>typeof v==="string");const urls=[];for(const v of values){if(/^https?:\/\//i.test(v.trim()))urls.push(v.trim());for(const m of v.matchAll(/https?:\/\/[^\s<>"')\]]+/gi))urls.push(m[0].replace(/[.,;!?]+$/, ""))}return [...new Set(urls)]}
@@ -264,6 +282,39 @@ function dedupeMatches(rows){
   }
   return [...map.values()];
 }
+
+/* P11_0_5_3_PRELIVE_SCHEDULE_CACHE */
+const PRELIVE_CACHE_GRACE_MS=15*60*1000,PRELIVE_CACHE_MAX_MS=36*60*60*1000;
+function cachedScheduleMs(m){const raw=m?.stats?._matchintel?.scheduledAt;if(!raw)return null;const t=new Date(raw).getTime();return Number.isFinite(t)?t:null}
+function cachePreliveRows(rows){
+  const now=Date.now();
+  for(const m of rows){
+    if(String(m?.state||"").toUpperCase()!=="PRELIVE"||!m?.provider_match_id)continue;
+    const t=cachedScheduleMs(m);if(t==null||t<now-PRELIVE_CACHE_GRACE_MS||t>now+PRELIVE_CACHE_MAX_MS)continue;
+    const key=m.match_key||`api:${m.provider_match_id}`;
+    const copy=JSON.parse(JSON.stringify(m));
+    copy.stats={...(copy.stats||{}),_matchintel:{...(copy.stats?._matchintel||{}),scheduleCache:true,scheduleCachedAt:new Date().toISOString()}};
+    seen.preliveCache[key]={row:copy,scheduledAt:t,cachedAt:Date.now()};
+  }
+  for(const [key,rec] of Object.entries(seen.preliveCache||{})){
+    const t=Number(rec?.scheduledAt||0);
+    if(!Number.isFinite(t)||t<now-PRELIVE_CACHE_GRACE_MS||t>now+PRELIVE_CACHE_MAX_MS)delete seen.preliveCache[key];
+  }
+}
+function mergePreliveCache(rows){
+  cachePreliveRows(rows);
+  const map=new Map(rows.map(m=>[m.match_key,m]));
+  for(const [key,rec] of Object.entries(seen.preliveCache||{})){
+    if(map.has(key)||!rec?.row)continue;
+    const row=JSON.parse(JSON.stringify(rec.row));
+    row.updated_at=new Date().toISOString();
+    row.stats={...(row.stats||{}),_matchintel:{...(row.stats?._matchintel||{}),scheduleCache:true,bridgeSyncedAt:new Date().toISOString(),freshnessBasis:"SCHEDULE_CACHE"}};
+    map.set(key,row);
+  }
+  saveSeen();
+  return [...map.values()];
+}
+
 function normalizeEvent(e){const event_type=text(e.event_type,e.eventType,e.type,e.name);if(!event_type)return null;const matchKey=text(e.match_key,e.matchKey)||(e.matchId?`api:${String(e.matchId)}`:null);return{match_key:matchKey,event_type,side:text(e.side,e.team),observed_minute:num(e.observed_minute,e.observedMinute,e.minute),detected_at:isoTime(e.detected_at??e.detectedAt??e.timestamp)??new Date().toISOString(),payload:e.payload||e}}
 
 const discoveryRoutes=["/radar","/matches","/match-sessions","/sessions","/prelive","/live","/focus","/scanner","/auto-scan"];
@@ -276,7 +327,7 @@ async function tick(){
 
   const matchCandidates=[];const sourceCounts={};
   for(const [route,payload] of routes){if(!payload)continue;const found=deepMatches(payload);sourceCounts[route]=found.length;matchCandidates.push(...found)}
-  const matches=dedupeMatches(matchCandidates);
+  const matches=mergePreliveCache(dedupeMatches(matchCandidates));
   const signalsRaw=[...deepSignalArrays(radar),...firstArray(signalsR,["signals","items","data"])];
   const eventsRaw=[...firstArray(radar,["events","timeline"]),...firstArray(eventsR,["events","items","data"])];
   const currentFps=new Set(signalsRaw.map(sigFingerprint));retireAbsentSignals(currentFps);
@@ -290,6 +341,7 @@ async function tick(){
   const scanFlag=findFlag(aggregate,["autoscan","scanneractive","scanactive","radaractive"]);
   const provider=text(statusR?.api_provider,statusR?.apiProvider,radar?.apiProvider,"API-Football");
   const prelive=matches.filter(m=>m.state==="PRELIVE").length,live=matches.filter(m=>m.state==="LIVE").length;
+  const preliveCached=matches.filter(m=>m?.stats?._matchintel?.scheduleCache).length;
   const status={id:"main",gateway_online:true,telegram_connected:telegramEvidence,auto_scan_active:scanFlag===null?(matches.length>0):scanFlag,shadow_mode:Boolean(statusR?.shadow_mode??statusR?.shadowMode??radar?.shadowMode??true),api_provider:provider,quota_daily_remaining:num(statusR?.quota_daily_remaining,statusR?.quotaDailyRemaining,radar?.quotaDailyRemaining),independent_sources:num(statusR?.independent_sources,statusR?.independentSources,radar?.independentSources)||0,last_sync_at:new Date().toISOString(),version:`${text(statusR?.version,radar?.version,"gateway")}|bridge-${VERSION}`};
 
   const r=await fetch(ingestUrl,{method:"POST",headers:{"content-type":"application/json","x-matchintel-key":ingestKey},body:JSON.stringify({matches,events,signals,status}),signal:AbortSignal.timeout(12000)});
@@ -331,17 +383,18 @@ async function tick(){
   const perfLabel=perfSnapshot?` perf=${perfSnapshot.settled_count||0}S/${perfSnapshot.observed_bets||0}O yield=${perfSnapshot.yield_pct==null?"—":Number(perfSnapshot.yield_pct).toFixed(1)+"%"}`:"";
   const btLabel=backtestR?` replay=${backtestR.source_quality?.audit_eligible||0}A/${backtestR.walk_forward?.prediction_count||0}W cand=${backtestR.candidate_count||0} promote=${backtestR.promotion_count||0}`:"";
   const histLabel=historyR?` hist=${historyR.history?.fixtures||0}/${historyR.targetFixtures||600} days=${historyR.history?.backfilledDays||0}/${historyR.targetDays||35} hphase=${historyR.phase||"?"}`:"";
-  console.log(new Date().toLocaleTimeString(),`P11.0.5.2 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
+  console.log(new Date().toLocaleTimeString(),`P11.0.5.3 sync OK | matches=${matches.length} prelive=${prelive} live=${live} signals=${signals.length} resolved=${resolvedSignals} events=${events.length} tickets=${readyTickets}/4 values=${valueReady}+${valueStrong}F${perfLabel}${btLabel}${histLabel}${baselineOnly?" | BASELINE BLOQUEADA":""}`);
   if(p3R?.lastSignalId)console.log("  p3 trace ->",`last=${p3R.lastSignalId} resolved=${p3R.resolved||0} unresolved=${p3R.unresolved||0} ambiguous=${p3R.ambiguous||0}`);
   const activeRoutes=Object.entries(sourceCounts).filter(([,n])=>n>0).map(([r,n])=>`${r}:${n}`).join(" ");
   if(activeRoutes)console.log("  radar sources ->",activeRoutes);
   console.log("  identity ->",`official=${identityStats.official} canonical_keys=${identityStats.canonicalProviderKeys} merged=${identityStats.mergedAliases} stale_prelive_blocked=${identityStats.suppressedOfficialPrelive+identityStats.suppressedUnsafePrelive} aliases_kept=${identityStats.keptAliases}`);
   const liveRows=matches.filter(m=>liveLikeState(m.state,m.phase)),liveMissing=liveRows.filter(m=>!m?.stats?._matchintel?.providerFetchedAt).length,liveBridge=liveRows.filter(m=>m?.stats?._matchintel?.freshnessBasis==="BRIDGE").length;
   console.log("  live freshness ->",`live=${liveRows.length} provider_missing=${liveMissing} bridge_basis=${liveBridge}`);
+  console.log("  operational feed ->",`prelive=${prelive} cached=${preliveCached} quota=${status.quota_daily_remaining??"?"} mode=${Number(status.quota_daily_remaining)<=20?"PAUSED_QUOTA":"ACTIVE"}`);
 }
 function deepSignalArrays(root){if(!root||typeof root!=="object")return[];const out=[];const visited=new Set();function walk(v,d){if(v===null||v===undefined||d>5||typeof v!=="object")return;if(visited.has(v))return;visited.add(v);if(Array.isArray(v)){for(const x of v)walk(x,d+1);return}for(const [k,x] of Object.entries(v)){if(/signal|telegram/i.test(k)&&Array.isArray(x))out.push(...x);else walk(x,d+1)}}walk(root,0);return out}
 
-console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.5.2 LIVE FRESHNESS | intervalo ${every/1000}s`);
-console.log("P11.0.5.2: fase 1H/HT/2H/ET/P/BT tem autoridade LIVE; relay/updated_at nunca vale como freshness esportiva. LIVE sem providerFetchedAt = STALE/EXPIRADO.");
+console.log(`MatchIntel Cloud Bridge v${VERSION} ativo | P3 TELEGRAM + P4A TICKETS + P4C2 VALUE + P5 PERFORMANCE + P6 BACKTEST + P7 HISTORY + P11.0.5.3 OPERATIONAL RECOVERY | intervalo ${every/1000}s`);
+console.log("P11.0.5.3: LIVE continua provider-only; PRELIVE legitimo ganha cache de agenda ate o kickoff; timestamps absurdos sao rejeitados; quota baixa vira estado explicito.");
 tick().catch(e=>console.error("sync:",e.message));
 setInterval(()=>tick().catch(e=>console.error("sync:",e.message)),every);

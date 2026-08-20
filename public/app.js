@@ -9,10 +9,12 @@ const state = { matches:[], signals:[], events:[], status:null, lifecycleSummary
 const $ = (s)=>document.querySelector(s);
 const $$=(s)=>[...document.querySelectorAll(s)];
 const esc=(s)=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
-const empty=(title,body)=>`<div class="empty"><div class="icon">◌</div><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`;
+/* P11_0_5_3_SETTLED_EMPTY */
+const empty=(title,body)=>`<div class="empty settled-empty"><h3>${esc(title)}</h3><p>${esc(body)}</p></div>`;
 const fmtTime=(d)=>{try{return new Date(d).toLocaleString("pt-BR",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"})}catch{return "—"}};
 const minuteLabel=(m,phase)=>m!=null?`${m}'`:(phase||"—");
-const isLive=(m)=>["LIVE","1H","HT","2H","ET","P"].includes(String(m.state||m.phase||"").toUpperCase());
+/* P11_0_5_3_APP_LIVE_TRUTH */
+const isLive=(m)=>{const s=`${m?.state||""} ${m?.phase||""}`.toUpperCase();return /\b(LIVE|1H|HT|2H|ET|P|BT)\b/.test(s)&&!/\b(FT|AET|PEN)\b|FINISHED/.test(s)};
 /* P11_0_4_PRELIVE_TRUTH_GATE */
 const PRELIVE_GRACE_MS=15*60*1000;
 const PRELIVE_MAX_AHEAD_MS=14*24*60*60*1000;
@@ -26,7 +28,7 @@ const isPrelive=(m)=>{
   return pre&&validPreliveKickoff(m);
 };
 /* P11_0_3_PRELIVE_KICKOFF_BRASILIA */
-const scheduledAt=(m)=>m?.stats?._matchintel?.scheduledAt||m?.source_matrix?.fields?.kickoff?.value||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;
+const scheduledAt=(m)=>{const raw=m?.stats?._matchintel?.scheduledAt||m?.source_matrix?.fields?.kickoff?.value||m?.stats?.scheduled_at||m?.stats?.fixture?.date||null;if(!raw)return null;const d=new Date(raw),y=d.getUTCFullYear();return Number.isFinite(d.getTime())&&y>=2020&&y<=2100?d.toISOString():null};
 const scheduledClock=(m)=>{const d=scheduledAt(m);if(!d)return "—";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(d))}catch{return "—"}};
 const scheduledMeta=(m)=>{const d=scheduledAt(m);if(!d)return "horário pendente";try{return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit"}).format(new Date(d))+" · Brasília"}catch{return "horário pendente"}};
 const scheduledLabel=(m)=>scheduledClock(m);
@@ -115,8 +117,12 @@ const SIGNAL_TTL_MS=10*60*1000;
 const LIVE_MATCH_TTL_MS=90*1000;
 const FUTURE_TOLERANCE_MS=2*60*1000;
 const gatewayFresh=()=>!!state.status?.last_sync_at && Date.now()-new Date(state.status.last_sync_at).getTime()<=90*1000;
-const matchAgeMs=(m)=>{const t=m?.updated_at?new Date(m.updated_at).getTime():0;return Number.isFinite(t)&&t?Date.now()-t:Number.POSITIVE_INFINITY};
-const isFreshLiveMatch=(m)=>gatewayFresh() && isLive(m) && matchAgeMs(m)>=-FUTURE_TOLERANCE_MS && matchAgeMs(m)<=LIVE_MATCH_TTL_MS;
+const liveProviderTime=(m)=>m?.provider_fetched_at||m?.stats?._matchintel?.providerFetchedAt||null;
+const liveFreshnessBasis=(m)=>String(m?.freshness_basis||m?.stats?._matchintel?.freshnessBasis||"").toUpperCase();
+const matchAgeMs=(m)=>{const t=liveProviderTime(m)?new Date(liveProviderTime(m)).getTime():0;return Number.isFinite(t)&&t?Date.now()-t:Number.POSITIVE_INFINITY};
+const isFreshLiveMatch=(m)=>gatewayFresh() && isLive(m) && liveFreshnessBasis(m)==="PROVIDER" && matchAgeMs(m)>=-FUTURE_TOLERANCE_MS && matchAgeMs(m)<=LIVE_MATCH_TTL_MS;
+const providerQuota=()=>{const q=Number(state.status?.quota_daily_remaining);return Number.isFinite(q)?q:null};
+const providerQuotaCritical=()=>providerQuota()!=null&&providerQuota()<=20;
 
 async function q(table, params=""){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`,{headers});
@@ -183,9 +189,12 @@ function renderStatus(){
   const stale=!s?.last_sync_at || Date.now()-new Date(s.last_sync_at).getTime()>90000;
   const recentTelegram=state.signals.some(x=>["mafia","betzord"].includes(providerKind(x)) && isFreshSignal(x));
   const telegramOn=!!s?.telegram_connected || recentTelegram;
+  const quota=Number(s?.quota_daily_remaining),quotaKnown=Number.isFinite(quota),quotaCritical=quotaKnown&&quota<=20;
+  const providerPill=quotaKnown?(quota<=6?`<span class="pill bad">Provider RESERVA LIVE · ${quota}</span>`:quotaCritical?`<span class="pill warn">Provider QUOTA CRÍTICA · ${quota}</span>`:`<span class="pill ok">Provider OK · ${quota}</span>`):'<span class="pill warn">Provider quota —</span>';
   $("#statusPills").innerHTML=[
     `<span class="pill ${s?.gateway_online&&!stale?"ok":"bad"}">Gateway ${s?.gateway_online&&!stale?"ON":"OFF"}</span>`,
     `<span class="pill ${telegramOn&&!stale?"ok":"warn"}">Telegram ${telegramOn&&!stale?"ON":"—"}</span>`,
+    providerPill,
     `<span class="pill ${s?.shadow_mode?"warn":"ok"}">${s?.shadow_mode?"SHADOW":"LIVE"}</span>`
   ].join("");
   if(!s?.last_sync_at) $("#lastSync").textContent="Sem sincronização";
@@ -237,13 +246,13 @@ function renderHome(){
   const featuredCount=preliveAll.filter(isFeaturedPrelive).length;
   const remaining=Math.max(0,preliveAll.length-prelive.length);
   const preEl=$("#homePrelive");
-  if(preEl) preEl.innerHTML=prelive.length?prelive.map(matchCard).join("")+(remaining?`<button class="prelive-more" id="preliveMoreBtn">Ver mais · ${Math.min(8,remaining)} de ${remaining}</button>`:""):empty("Radar pré-live aguardando partidas","O MatchIntel deve receber a agenda do Gateway mesmo sem sinais do Telegram.");
+  if(preEl) preEl.innerHTML=prelive.length?prelive.map(matchCard).join("")+(remaining?`<button class="prelive-more" id="preliveMoreBtn">Ver mais · ${Math.min(8,remaining)} de ${remaining}</button>`:""):empty(providerQuotaCritical()?"Agenda pré-live em espera de quota":"Radar pré-live monitorando",providerQuotaCritical()?`API-Football está preservando a reserva operacional (${providerQuota()} chamadas). A agenda retoma automaticamente após a renovação da quota; jogos antigos não são reutilizados.`:"Consulta concluída · nenhuma partida futura válida está disponível agora.");
   const preCount=$("#preliveCount"); if(preCount) preCount.textContent=featuredCount?`${featuredCount} em destaque · ${preliveAll.length} monitorados`:`${preliveAll.length} monitorados`;
 
   const live=state.matches.filter(isFreshLiveMatch).slice(0,8);
   $("#homeLive").innerHTML=live.length?live.map(matchCard).join(""):empty(
-    gatewayFresh()?"Nenhum jogo ao vivo no relay":"Gateway sem atualização",
-    gatewayFresh()?"O radar autônomo continuará procurando partidas independentemente do Telegram.":"Partidas antigas ficam bloqueadas até uma nova sincronização."
+    gatewayFresh()?(providerQuotaCritical()?"Nenhum LIVE validado · quota protegida":"Nenhum jogo LIVE fresco agora"):"Gateway sem atualização",
+    gatewayFresh()?(providerQuotaCritical()?`A reserva LIVE está protegida (${providerQuota()} chamadas). Somente providerFetchedAt realmente fresco libera uma partida.`:"Consulta concluída · dados antigos ou DEGRADED não são apresentados como LIVE operacional."):"Partidas antigas ficam bloqueadas até uma nova sincronização."
   );
   $("#liveCount").textContent=`${live.length} jogo${live.length===1?"":"s"}`;
 
@@ -280,8 +289,8 @@ function renderLive(){
     return Number(b.priority||0)-Number(a.priority||0);
   });
   $("#liveList").innerHTML=rows.length?rows.map(matchCard).join(""):empty(
-    state.liveFilter==="prelive"?"Nenhuma partida pré-live recebida":(gatewayFresh()?"Nenhum jogo neste filtro":"Gateway sem atualização"),
-    state.liveFilter==="prelive"?"O Bridge P2 procura Match Sessions e agenda em múltiplas rotas locais do Gateway.":(gatewayFresh()?"O filtro mostra somente partidas reais e frescas.":"Nenhuma partida antiga é tratada como ao vivo.")
+    state.liveFilter==="prelive"?(providerQuotaCritical()?"Pré-live aguardando renovação de quota":"Nenhuma partida pré-live válida agora"):(gatewayFresh()?"Nenhum jogo neste filtro":"Gateway sem atualização"),
+    state.liveFilter==="prelive"?(providerQuotaCritical()?`Agenda diária está em modo PAUSED_QUOTA (${providerQuota()} chamadas); retomada é automática.`:"Consulta concluída; o cache de agenda preserva somente partidas futuras legítimas."):(gatewayFresh()?"O filtro mostra somente partidas reais e provider-FRESH.":"Nenhuma partida antiga é tratada como ao vivo.")
   );
 }
 function providerKind(s){const x=`${s.provider_family} ${s.provider_name}`.toLowerCase();return x.includes("betzord")?"betzord":x.includes("máfia")||x.includes("mafia")?"mafia":"other"}
