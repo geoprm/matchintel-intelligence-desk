@@ -350,8 +350,8 @@ function renderSignals(){
     {name:"The Odds API",on:fresh&&oddsConfigured,status:fresh&&oddsConfigured?"Ativa":oddsConfigured?"Aguardando Gateway":"Aguardando chave",sub:oddsConfigured?"segunda família esportiva + consenso de odds; não conta Telegram":"feed externo opcional para P4B/P4C"},
     {name:"Telegram",on:fresh&&tgConfigured,status:fresh&&tgConfigured?"Conectado":tgConfigured?"Aguardando Gateway":"Manual",sub:fresh&&tgConfigured?"Chat Máfia / BetZord via conta local":"A conexão Telegram depende do Gateway local ligado"},
     {name:"Source Matrix",on:fresh&&matrixCount>0,status:fresh?(matrixCount>0?"Ativa":"Sem consenso"):"Aguardando Gateway",sub:`${matrixCount} fonte(s) independente(s) no status global`},
-    {name:"Bet365",on:false,status:"Manual",sub:"link original do Chat Máfia / view manual"},
-    {name:"SofaScore / Flashscore",on:false,status:"Planejada",sub:"planejadas/manual quando não houver adapter ativo"}
+    /* P11_0_5_6_SOURCE_STATUS */{name:"Bet365",on:true,status:"Assistida",sub:"links do Chat Máfia + validação humana auditável; sem scraping"},
+    {name:"SofaScore / Flashscore",on:true,status:"Assistida",sub:"verificação rápida/manual por pesquisa; sem adapter automático nesta fase"}
   ];
   $("#sourceList").innerHTML=sources.map(x=>`<div class="source"><span class="dot" style="${x.on?"":"background:#566663"}"></span><div class="main"><strong>${x.name}</strong><small>${esc(x.sub)}</small></div><span class="pill ${x.on?"ok":x.status==="Aguardando Gateway"?"warn":""}">${esc(x.status)}</span></div>`).join("");
 }
