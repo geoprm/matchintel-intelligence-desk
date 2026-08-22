@@ -109,7 +109,7 @@ function qualifiedBestLevel(m){return qualifiedProbability(m)==null?'Não qualif
 const P0_VERSION="p0-freshness-v1.2";
 const P1_VERSION="p1-push-v1.0.1";
 const P2_VERSION="p2-autonomous-radar-v1.0";
-const VAPID_PUBLIC_KEY="BGaSDtAPm1iwLkjlsti4WsrCW5xIlp_Nc5dgNniZv2UMyL6qxgKBJlNi-cJBShyZRhfWc-DIFdU32Oj-RGH61Qw";
+const VAPID_PUBLIC_KEY="BGkTAjIEZvyAPrDWGUJzGseRpN0b4YtVbJ0kBzxrlpKdKUdU0Jz7Jf4su60c3iD9v1oAwGqQv4Br4xqL_7N0CXM";
 const PUSH_SUBSCRIBE_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-subscribe";
 const PUSH_TEST_URL="https://tkzfkkqcgmzqjfcokrws.supabase.co/functions/v1/matchintel-push-test";
 const PRIORITY_TTL_MS=5*60*1000;
