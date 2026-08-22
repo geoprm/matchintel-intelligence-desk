@@ -294,6 +294,9 @@ function renderLive(){
   );
 }
 function providerKind(s){const x=`${s.provider_family} ${s.provider_name}`.toLowerCase();return x.includes("betzord")?"betzord":x.includes("máfia")||x.includes("mafia")?"mafia":"other"}
+/* P11_0_5_7_BETZORD_MARKET_LABEL */
+function signalDisplayMarket(s){const t=`${s?.market||""} ${s?.signal_type||""}`.toUpperCase();return providerKind(s)==="betzord"&&/GOAL_HT|GOL_HT|OVER.?0?5.*HT/.test(t)?"OVER 0.5 HT":(s?.market||s?.signal_type||"")}
+
 function safeBookmakerUrl(s){
   const raw=String(s?.bookmaker_url||"").trim();
   if(!raw) return "";
@@ -329,7 +332,7 @@ function signalCard(s){
     <div class="signal-main">
       <strong>${esc(s.provider_name||s.provider_family)} ${badges}</strong>
       <p>${esc(s.text_summary||s.market||s.signal_type)}</p>
-      <small>${esc(s.market||"")} · ${ageLabel}</small>
+      <small>${esc(signalDisplayMarket(s))} · ${ageLabel}</small>
       ${bookUrl?`<div class="signal-actions"><a class="bookmaker-link" href="${esc(bookUrl)}" target="_blank" rel="noopener noreferrer">${bookLabel} ↗</a></div>`:""}
     </div>
   </div>`;
@@ -557,6 +560,17 @@ async function initPushUI(){
   }
   if(Notification.permission==="granted"){
     try{
+      /* P11_0_5_7_PUSH_SUB_REPAIR */
+      const repairKey="matchintel-push-repair-p11057";
+      if(localStorage.getItem(repairKey)!=="1"){
+        const repairReg=await navigator.serviceWorker.ready;
+        const oldSub=await repairReg.pushManager.getSubscription();
+        if(oldSub){try{await oldSub.unsubscribe()}catch{}}
+        localStorage.setItem(repairKey,"1");
+        await ensurePushSubscription(false);
+        setAlertsStatus("Notificações renovadas neste aparelho · aguardando próximo sinal real.",true);
+        return;
+      }
       const reg=await navigator.serviceWorker.ready;
       const sub=await reg.pushManager.getSubscription();
       if(sub){
